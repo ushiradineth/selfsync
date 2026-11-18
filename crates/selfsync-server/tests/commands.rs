@@ -856,7 +856,7 @@ async fn doctor_reports_setup_problems() {
     let v = find(&r, "vault «notes»");
     assert!(
         v.iter()
-            .any(|(l, t)| *l == Level::Warn && t.contains("verification")),
+            .any(|(l, t)| *l == Level::Warn && t.contains("verify has never run")),
         "{v:?}"
     );
     assert_eq!(

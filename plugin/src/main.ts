@@ -238,7 +238,7 @@ export default class SelfsyncPlugin extends Plugin {
   private backend(): FileBackend {
     const adapter = this.app.vault.adapter;
     if (Platform.isDesktop && adapter instanceof FileSystemAdapter) {
-      // eslint-disable-next-line no-undef, @typescript-eslint/no-require-imports -- Node fs есть только в десктопном Obsidian (там у плагина CommonJS require): подгружается здесь, а не при загрузке main.js
+      // Load Node's filesystem only on desktop, where Obsidian provides CommonJS require.
       const fsp = require("fs/promises") as typeof import("node:fs/promises");
       return new NodeBackend(adapter.getBasePath(), adapter.getFullPath(this.pluginDir), fsp, {
         caseSensitive: Platform.isLinux,

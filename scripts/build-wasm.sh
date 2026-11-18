@@ -14,7 +14,7 @@ export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=${CARGO_HOME:-$HO
 --remap-path-prefix=$sysroot=/rust --remap-path-prefix=$sysroot/lib/rustlib/src/rust=/rustc/$commit \
 --remap-path-prefix=$PWD=/selfsync"
 
-cargo build -p selfsync-wasm --target wasm32-unknown-unknown --profile wasm
+cargo build --locked -p selfsync-wasm --target wasm32-unknown-unknown --profile wasm
 if grep -aq -e "$HOME" -e "$PWD" target/wasm32-unknown-unknown/wasm/selfsync_wasm.wasm; then
   echo "в WASM остались пути этой машины" >&2
   exit 1

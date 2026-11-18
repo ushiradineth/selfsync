@@ -91,7 +91,7 @@ test("main.js: синк при старте и по событиям vault'а", 
   for (let i = 0; i < 100 && !plugin.runner; i++) await new Promise((r) => setTimeout(r, 10));
   assert.ok(plugin.runner, "движок запущен");
   await plugin.runner.idle();
-  assert.match(plugin.statusBar.text, /Синхронизировано/);
+  assert.match(plugin.statusBar.text, /Synced/);
 
   const other = await TestClient.create(server, { name: "other", token: server.token("plugin", "other") });
   await other.sync();
@@ -119,7 +119,7 @@ test("main.js: синк при старте и по событиям vault'а", 
   await fsp.rm(vault, { recursive: true, force: true });
 });
 
-test("main.js: устройство только для чтения — статус и скрытые действия", async () => {
+test("main.js: устройство read-only — статус и скрытые действия", async () => {
   const roToken = server.cli("token", "add", "--vault", "ro", "--name", "mirror", "--read-only").trim().split("\n").pop() ?? "";
   const rwVault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-rw-"));
   const roVault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-ro-"));
@@ -128,20 +128,20 @@ test("main.js: устройство только для чтения — ста�
   await fsp.writeFile(join(roVault, "local.md"), "only here\n");
   ro.runner?.send({ type: "syncNow" });
   await ro.runner?.idle();
-  assert.match(ro.statusBar.text, /Только чтение/);
-  assert.match(ro.statusBar.text, /не уйдут на сервер: 1/);
-  assert.ok(obsidian.shown.some((m) => m.includes("только для чтения")), obsidian.shown.join("\n"));
+  assert.match(ro.statusBar.text, /Read-only/);
+  assert.match(ro.statusBar.text, /1 local changes will not be sent/);
+  assert.ok(obsidian.shown.some((m) => m.includes("read-only")), obsidian.shown.join("\n"));
 
   const buttons = (rows: obsidian.Setting[]): string[] => rows.flatMap((r) => r.buttons);
   const rwRows = await renderSettings(rw);
-  for (const b of ["Включить шифрование", "Создать ссылку", "Отозвать"]) assert.ok(buttons(rwRows).includes(b), `${b}: ${buttons(rwRows)}`);
-  assert.ok(rwRows.some((r) => r.name === "Только чтение" && r.toggles === 1), "переключатель для ссылки");
-  assert.ok(rwRows.some((r) => r.desc.includes("только чтение")), "пометка в списке устройств");
+  for (const b of ["Enable encryption", "Create link", "Revoke"]) assert.ok(buttons(rwRows).includes(b), `${b}: ${buttons(rwRows)}`);
+  assert.ok(rwRows.some((r) => r.name === "Read-only" && r.toggles === 1), "переключатель для ссылки");
+  assert.ok(rwRows.some((r) => r.desc.includes("read-only")), "пометка в списке устройств");
   // версия клиента — у тех, кто уже выходил на связь
   assert.ok(rwRows.some((r) => r.name.startsWith("mirror") && r.desc.includes("plugin/9.9.9")), "версия клиента в списке");
   const roRows = await renderSettings(ro);
-  for (const b of ["Включить шифрование", "Создать ссылку", "Отозвать"]) assert.ok(!buttons(roRows).includes(b), `${b}: ${buttons(roRows)}`);
-  assert.ok(roRows.some((r) => r.desc.includes("подключено только для чтения")), "пояснение");
+  for (const b of ["Enable encryption", "Create link", "Revoke"]) assert.ok(!buttons(roRows).includes(b), `${b}: ${buttons(roRows)}`);
+  assert.ok(roRows.some((r) => r.desc.includes("connected read-only")), "пояснение");
 
   rw.onunload();
   ro.onunload();
@@ -179,7 +179,7 @@ test("main.js: строки, изменившиеся при закрытых н
   await fsp.rm(vault, { recursive: true, force: true });
 });
 
-test("main.js: сервер старее 0.2.1 — ссылки «только для чтения» нет", async () => {
+test("main.js: сервер старее 0.2.1 — ссылки «read-only» нет", async () => {
   const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-oldsrv-"));
   obsidian.hiddenResponseHeaders.add("x-selfsync-proto");
   try {
@@ -187,8 +187,8 @@ test("main.js: сервер старее 0.2.1 — ссылки «только �
     plugin.runner?.send({ type: "syncNow" });
     await plugin.runner?.idle();
     assert.equal(plugin.runner?.status().serverMinor, 0);
-    const row = (await renderSettings(plugin)).find((r) => r.name === "Только чтение" && r.toggles === 1);
-    assert.match(row?.desc ?? "", /Сервер не поддерживает/);
+    const row = (await renderSettings(plugin)).find((r) => r.name === "Read-only" && r.toggles === 1);
+    assert.match(row?.desc ?? "", /The server does not support/);
     const r = await plugin.runner?.command({ type: "createJoin", name: "tablet", readOnly: true });
     assert.equal(r?.code, "server_outdated");
     const ok = await plugin.runner?.command({ type: "createJoin", name: "tablet" });
@@ -200,7 +200,7 @@ test("main.js: сервер старее 0.2.1 — ссылки «только �
   }
 });
 
-test("main.js: пришли настройки Obsidian — одно уведомление о перезапуске", async () => {
+test("main.js: пришли настройки Obsidian — одно уведомление о restartingе", async () => {
   const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-cfg-"));
   // Старые настройки (до пресетов): каталог настроек в пользовательских исключениях.
   const plugin = await loadPlugin(vault, server.token("cfgplugin", "obsidian"), {
@@ -224,7 +224,7 @@ test("main.js: пришли настройки Obsidian — одно уведо�
   await plugin.runner?.idle();
   assert.equal(await fsp.readFile(join(vault, ".obsidian/hotkeys.json"), "utf8"), '{"k":1}\n');
   await assert.rejects(fsp.readFile(join(vault, ".obsidian/app.json")), "app.json — другой пресет");
-  const restart = (): number => obsidian.shown.slice(before).filter((m) => m.includes("Перезапустите Obsidian")).length;
+  const restart = (): number => obsidian.shown.slice(before).filter((m) => m.includes("Restart Obsidian")).length;
   assert.equal(restart(), 1);
   await other.write(".obsidian/hotkeys.json", '{"k":2}\n');
   await other.sync();
@@ -252,13 +252,13 @@ test("main.js: шифрование включили на другом устр�
     phone.runner?.send({ type: "syncNow" });
     await phone.runner?.idle();
     assert.equal(phone.runner?.status().state, "needPassword");
-    assert.ok(obsidian.shown.slice(before).some((m) => m.includes("ввести пароль")), obsidian.shown.join("\n"));
+    assert.ok(obsidian.shown.slice(before).some((m) => m.includes("enter the password")), obsidian.shown.join("\n"));
     const buttons = (rows: obsidian.Setting[]): string[] => rows.flatMap((r) => r.buttons);
     const locked = await renderSettings(phone);
-    assert.ok(buttons(locked).includes("Ввести пароль"), `${buttons(locked)}`);
-    assert.ok(!buttons(locked).includes("Включить шифрование"), `${buttons(locked)}`);
-    assert.ok(locked.some((r) => r.desc.includes("Введите пароль")), "пояснение");
-    assert.ok(!locked.some((r) => r.desc.startsWith("Выключено")), "не «выключено»");
+    assert.ok(buttons(locked).includes("Enter password"), `${buttons(locked)}`);
+    assert.ok(!buttons(locked).includes("Enable encryption"), `${buttons(locked)}`);
+    assert.ok(locked.some((r) => r.desc.includes("Enter the password")), "пояснение");
+    assert.ok(!locked.some((r) => r.desc.startsWith("Off")), "не «выключено»");
 
     phone.runner?.send({ type: "password", password: PW, remember: true });
     await phone.runner?.idle();
@@ -266,8 +266,8 @@ test("main.js: шифрование включили на другом устр�
     await phone.runner?.idle();
     assert.equal(phone.runner?.status().encrypted, true);
     const open = await renderSettings(phone);
-    assert.ok(buttons(open).includes("Сменить пароль"), `${buttons(open)}`);
-    assert.ok(!buttons(open).includes("Ввести пароль"), `${buttons(open)}`);
+    assert.ok(buttons(open).includes("Change password"), `${buttons(open)}`);
+    assert.ok(!buttons(open).includes("Enter password"), `${buttons(open)}`);
   } finally {
     phone.onunload();
     await pc.stop();
@@ -306,7 +306,7 @@ test("main.js: подключение к другому vault'у — индек�
   }
 });
 
-test("main.js: два перезапуска подряд оставляют один живой движок", async () => {
+test("main.js: два restartingа подряд оставляют один живой движок", async () => {
   const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-restart-"));
   const plugin = await loadPlugin(vault, server.token("restart", "stub"));
   const p = plugin as unknown as { start(): Promise<void>; runner?: unknown };
@@ -346,7 +346,7 @@ test("main.js: индекс не читается — ошибка в строк
   try {
     await plugin.onload();
     for (let i = 0; i < 50 && !/Ошибка/.test(plugin.statusBar.text); i++) await new Promise((r) => setTimeout(r, 10));
-    assert.match(plugin.statusBar.text, /Ошибка синхронизации/);
+    assert.match(plugin.statusBar.text, /Sync error/);
     assert.equal(plugin.runner, undefined);
     assert.deepEqual(unhandled, []);
   } finally {
@@ -356,7 +356,7 @@ test("main.js: индекс не читается — ошибка в строк
   }
 });
 
-test("main.js: сбой ядра — перезапуск с паузой, после трёх подряд — стоп и уведомление", async () => {
+test("main.js: сбой ядра — restarting с паузой, после трёх подряд — стоп и уведомление", async () => {
   const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-crash-"));
   const plugin = await loadPlugin(vault, server.token("crash", "stub"));
   const p = plugin as unknown as { restartBaseMs: number; runner?: { engine: { handle(): unknown } } };
@@ -379,17 +379,17 @@ test("main.js: сбой ядра — перезапуск с паузой, по�
     let prev: unknown = plugin.runner;
     crash();
     assert.equal(plugin.runner, undefined, "упавший движок брошен");
-    assert.match(plugin.statusBar.text, /перезапуск/);
+    assert.match(plugin.statusBar.text, /restarting/);
     await restarted(prev);
     prev = plugin.runner;
     crash();
     await restarted(prev);
     crash();
     await new Promise((r) => setTimeout(r, 100));
-    assert.equal(plugin.runner, undefined, "после трёх сбоев подряд не перезапускается");
-    assert.match(plugin.statusBar.text, /Ошибка синхронизации/);
+    assert.equal(plugin.runner, undefined, "после трёх сбоев подряд не restartingается");
+    assert.match(plugin.statusBar.text, /Sync error/);
     assert.ok(
-      obsidian.shown.some((m) => m.includes("остановлено")),
+      obsidian.shown.some((m) => m.includes("stopped")),
       obsidian.shown.join("\n"),
     );
     // Ручной «Синхронизировать сейчас» пробует снова.
@@ -402,7 +402,7 @@ test("main.js: сбой ядра — перезапуск с паузой, по�
   }
 });
 
-test("main.js: журнал синка в файле каталога плагина переживает перезапуск", async () => {
+test("main.js: журнал синка в файле каталога плагина переживает restarting", async () => {
   const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-log-"));
   try {
     await fsp.writeFile(join(vault, "a.md"), "# a\n");

@@ -223,7 +223,7 @@ test("адаптер: stat «нет файла» для файла из лист
   await phone.sync();
   await desk.sync();
   assert.equal(await desk.read("keep.md"), "keep\n", "ложное удаление ушло на другие устройства");
-  assert.ok(phone.logs.some((l) => l.includes("keep.md") && l.includes("пропущен")), phone.logs.join("\n"));
+  assert.ok(phone.logs.some((l) => l.includes("keep.md") && l.includes("skipped")), phone.logs.join("\n"));
   stub2.failStat.clear();
   await phone.sync();
   assert.equal(stub2.text("keep.md"), "keep\n");

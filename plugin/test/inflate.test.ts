@@ -53,7 +53,7 @@ test("оборванный и испорченный поток — ошибка
   for (const cut of [1, 10, packed.length >> 1, packed.length - 1]) {
     assert.throws(() => inflateRaw(packed.subarray(0, cut)), /inflate/, `обрезано до ${cut}`);
   }
-  assert.throws(() => inflateRaw(Buffer.from([0x07])), /inflate: неверный тип блока/);
+  assert.throws(() => inflateRaw(Buffer.from([0x07])), /inflate: invalid block type/);
   // Блок без сжатия с неверной контрольной длиной.
   assert.throws(() => inflateRaw(Buffer.from([0x01, 0x05, 0x00, 0x00, 0x00])), /inflate/);
 });

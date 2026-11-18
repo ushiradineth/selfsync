@@ -154,7 +154,7 @@ describe("подключение", () => {
 
   test("по ссылке только для чтения", async () => {
     const out = server.cli("link", "--vault", "rojoin", "--name", "tablet", "--url", server.url, "--read-only");
-    assert.match(out, /только для чтения/);
+    assert.match(out, /read-only/);
     const code = /Код для ручного ввода: (\S+)/.exec(out)?.[1];
     assert.ok(code, out);
     const writer = await TestClient.create(server, { name: "writer", token: server.token("rojoin", "writer") });

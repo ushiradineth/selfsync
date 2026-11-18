@@ -124,7 +124,7 @@ describe("синк между двумя устройствами", () => {
 describe("подключение", () => {
   test("по одноразовому коду", async () => {
     const out = server.cli("link", "--vault", "join", "--name", "phone", "--url", server.url);
-    const code = /Код для ручного ввода: (\S+)/.exec(out)?.[1];
+    const code = /Manual connection code: (\S+)/.exec(out)?.[1];
     assert.ok(code, out);
     const fresh = await TestClient.create(server, { name: "phone" });
     const r = await fresh.runner.command({ type: "redeem", code, name: "phone" });
@@ -155,7 +155,7 @@ describe("подключение", () => {
   test("по ссылке только для чтения", async () => {
     const out = server.cli("link", "--vault", "rojoin", "--name", "tablet", "--url", server.url, "--read-only");
     assert.match(out, /read-only/);
-    const code = /Код для ручного ввода: (\S+)/.exec(out)?.[1];
+    const code = /Manual connection code: (\S+)/.exec(out)?.[1];
     assert.ok(code, out);
     const writer = await TestClient.create(server, { name: "writer", token: server.token("rojoin", "writer") });
     await writer.write("shared.md", "from writer\n");

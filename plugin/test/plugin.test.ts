@@ -289,7 +289,7 @@ test("main.js: подключение к другому vault'у — индек�
       await other.sync();
     }
     const out = server.cli("link", "--vault", "switch-b", "--name", "stub", "--url", server.url);
-    const code = /Код для ручного ввода: (\S+)/.exec(out)?.[1] ?? "";
+    const code = /Manual connection code: (\S+)/.exec(out)?.[1] ?? "";
     const p = plugin as unknown as { redeem(s: string, c: string, d: string): Promise<unknown>; runner?: LoadedPlugin["runner"] };
     assert.equal(await p.redeem(server.url, code, "stub"), null);
     for (let i = 0; i < 100 && !p.runner; i++) await new Promise((r) => setTimeout(r, 10));

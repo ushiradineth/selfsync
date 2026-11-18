@@ -71,11 +71,13 @@ jobs:
           cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
           sudo apt-get update && sudo apt-get install -y binaryen
       - run: ./scripts/build-wasm.sh
+      - run: cargo build --locked -p selfsync-server
       - working-directory: plugin
         run: |
           npm ci
           npm run lint
           npm run build
+          npm test
           mkdir -p ../dist
           # Каталог Obsidian скачивает эти три файла из релиза по отдельности.
           cp main.js styles.css ../dist/

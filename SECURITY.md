@@ -35,7 +35,7 @@ malicious server.** A compromised server can replay an old valid revision, swap
 valid ciphertext between files, hide entries or delete them. Encryption prevents
 creating arbitrary new authenticated ciphertext, but does not detect those
 whole-record attacks. Independent versioned backups remain necessary. This fork
-preserves the upstream protocol and existing vault format; the fixes in 0.10.2 do
+preserves the upstream protocol and existing vault format; the fixes in 0.10.3 do
 not claim to solve this limitation. Solving it requires an authenticated metadata
 protocol and a coordinated migration of every client.
 

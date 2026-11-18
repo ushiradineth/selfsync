@@ -6,8 +6,8 @@ This is the English-first security maintenance fork at
 errors, logs and diagnostics use English; the Obsidian plugin starts in English.
 The protocol and existing vault data remain compatible with upstream 0.10.1.
 
-Fork releases contain the Obsidian plugin (`0.10.2`), Linux server/CLI binaries
-(`server-0.10.2`) and the multi-platform image `ghcr.io/ushiradineth/selfsync:0.10.2`.
+Fork releases contain the Obsidian plugin (`0.10.3`), Linux server/CLI binaries
+(`server-0.10.3`) and the multi-platform image `ghcr.io/ushiradineth/selfsync:0.10.3`.
 Install this fork's plugin release to receive its desktop filesystem fixes;
 changing only the server image does not update Obsidian's installed plugin.
 

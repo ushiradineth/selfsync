@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.10.2 (ushiradineth fork)
+## 0.10.3 (ushiradineth fork)
 
 - Reject symbolic and hard links at temporary write paths instead of truncating
   their targets. Create replacement files exclusively with private permissions.

@@ -11,12 +11,12 @@ pub const WORDS: usize = 24;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PhraseError {
-    #[error("во фразе {0} слов, нужно 24")]
+    #[error("phrase has {0} words; 24 required")]
     WordCount(usize),
     /// Номер слова — с единицы, как на листке с фразой.
-    #[error("слово {index} («{word}») не из словаря BIP-39")]
+    #[error("word {index} ({word}) is not in the BIP-39 dictionary")]
     UnknownWord { index: usize, word: String },
-    #[error("контрольная сумма не сходится: слова перепутаны или одно заменено похожим")]
+    #[error("checksum mismatch: words are out of order or a word is incorrect")]
     Checksum,
 }
 

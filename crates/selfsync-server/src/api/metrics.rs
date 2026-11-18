@@ -97,7 +97,7 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
     let mut o = Out::default();
     o.gauge(
         "selfsync_build_info",
-        "Версия сервера и протокола.",
+        "Server and protocol version.",
         &[
             ("version", env!("CARGO_PKG_VERSION")),
             ("proto", &selfsync_proto::proto_header()),
@@ -106,7 +106,7 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
     );
     o.gauge(
         "selfsync_process_start_time_seconds",
-        "Время запуска процесса (сервер по сокету выходит по простою).",
+        "Process start time (socket-activated servers exit when idle).",
         &[],
         secs(st.started_ms),
     );
@@ -124,7 +124,7 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
         };
         o.gauge(
             "selfsync_device_last_seen_timestamp_seconds",
-            "Когда устройство последний раз выходило на связь (0 — ни разу).",
+            "Last device contact time (0 means never).",
             &[
                 ("vault", &d.vault),
                 ("device", &d.name),
@@ -138,7 +138,7 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
     for (rule, n) in &blocked {
         o.gauge(
             "selfsync_rate_limit_blocked",
-            "Ключи лимитера, заблокированные сейчас.",
+            "Currently blocked rate-limit keys.",
             &[("rule", rule)],
             *n as f64,
         );
@@ -147,7 +147,7 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
         o.metric(
             "selfsync_events_total",
             "counter",
-            "События с момента создания server.db: ответы 401, 403, 426, 429 и 5xx.",
+            "Events since server.db was created: 401, 403, 426, 429 and 5xx responses.",
             &[("event", name)],
             *n as f64,
         );
@@ -179,59 +179,59 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
             .await?;
         let l = [("vault", name.as_str())];
         let n = |x: u64| x as f64;
-        o.gauge("selfsync_vault_files", "Живые файлы.", &l, n(s.files));
-        o.gauge("selfsync_vault_folders", "Живые папки.", &l, n(s.folders));
+        o.gauge("selfsync_vault_files", "Live files.", &l, n(s.files));
+        o.gauge(
+            "selfsync_vault_folders",
+            "Live directories.",
+            &l,
+            n(s.folders),
+        );
         o.gauge(
             "selfsync_vault_deleted",
-            "Удалённые пути в корзине.",
+            "Deleted paths in trash.",
             &l,
             n(s.deleted),
         );
         o.gauge(
             "selfsync_vault_revisions",
-            "Версии в истории.",
+            "Historical revisions.",
             &l,
             n(s.revisions),
         );
         o.gauge(
             "selfsync_vault_live_bytes",
-            "Сумма размеров текущих версий.",
+            "Total size of current revisions.",
             &l,
             n(s.live_bytes),
         );
         o.gauge(
             "selfsync_vault_stored_bytes",
-            "Размер каталога блобов.",
+            "Blob directory size.",
             &l,
             n(s.stored_bytes),
         );
-        o.gauge("selfsync_vault_blobs", "Блобы в хранилище.", &l, n(s.blobs));
-        o.gauge(
-            "selfsync_vault_seq",
-            "Голова журнала изменений.",
-            &l,
-            n(s.seq),
-        );
+        o.gauge("selfsync_vault_blobs", "Stored blobs.", &l, n(s.blobs));
+        o.gauge("selfsync_vault_seq", "Change journal head.", &l, n(s.seq));
         o.gauge(
             "selfsync_vault_encrypted",
-            "Vault зашифрован (есть запись ключа).",
+            "Vault is encrypted (key record exists).",
             &l,
             f64::from(u8::from(vs.key_version > 0)),
         );
         for (metric, help, x) in [
             (
                 "selfsync_vault_quota_soft_bytes",
-                "Квота: мягкий порог байтов хранилища.",
+                "Quota: soft storage limit in bytes.",
                 vs.quota_soft,
             ),
             (
                 "selfsync_vault_quota_hard_bytes",
-                "Квота: жёсткий порог байтов хранилища.",
+                "Quota: hard storage limit in bytes.",
                 vs.quota_hard,
             ),
             (
                 "selfsync_vault_devices_limit",
-                "Квота: активных устройств.",
+                "Quota: active devices.",
                 u64::from(devices_limit),
             ),
         ] {
@@ -241,33 +241,33 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
         }
         o.gauge(
             "selfsync_vault_blobs_wanted",
-            "Блобы, которые сервер просит у устройств после verify.",
+            "Blobs requested from devices after verification.",
             &l,
             f64::from(vs.blobs_wanted),
         );
         if let Some(at) = verify[0] {
             o.gauge(
                 "selfsync_verify_last_run_timestamp_seconds",
-                "Время последней проверки selfsync verify.",
+                "Time of last selfsync verify.",
                 &l,
                 secs(at),
             );
             for (i, (metric, help)) in [
                 (
                     "selfsync_verify_corrupt_blobs",
-                    "Битые блобы при последней проверке.",
+                    "Damaged blobs at last verification.",
                 ),
                 (
                     "selfsync_verify_missing_blobs",
-                    "Отсутствующие блобы при последней проверке.",
+                    "Missing blobs at last verification.",
                 ),
                 (
                     "selfsync_verify_db_errors",
-                    "Ошибки базы vault'а при последней проверке.",
+                    "Vault database errors at last verification.",
                 ),
                 (
                     "selfsync_verify_key_problem",
-                    "Запись ключа отсутствует или не разбирается.",
+                    "Key record is missing or invalid.",
                 ),
             ]
             .into_iter()

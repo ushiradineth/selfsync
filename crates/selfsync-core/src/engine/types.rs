@@ -934,7 +934,7 @@ pub struct Phrase(pub Vec<String>);
 
 impl std::fmt::Debug for Phrase {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Phrase({} слов, скрыто)", self.0.len())
+        write!(f, "Phrase({} words, redacted)", self.0.len())
     }
 }
 

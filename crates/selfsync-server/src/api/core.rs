@@ -146,7 +146,7 @@ pub async fn ops(
 ) -> ApiResult<Proto<pb::OpsResponse>> {
     if req.ops.len() > MAX_OPS {
         return Err(ApiError::too_large(format!(
-            "не больше {MAX_OPS} операций за запрос"
+            "at most {MAX_OPS} operations per request"
         )));
     }
     let device = a.device_id;

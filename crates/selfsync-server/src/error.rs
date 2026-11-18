@@ -57,14 +57,14 @@ impl ApiError {
     }
 
     pub fn not_found(code: &'static str) -> Self {
-        Self::new(StatusCode::NOT_FOUND, code, "не найдено")
+        Self::new(StatusCode::NOT_FOUND, code, "not found")
     }
 
     pub fn unauthorized() -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
-            "нужен действующий токен",
+            "a valid token is required",
         )
     }
 
@@ -83,18 +83,18 @@ impl ApiError {
             ..Self::new(
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limited",
-                format!("слишком много неудачных попыток, повторите через {secs} с"),
+                format!("too many failed attempts; retry in {secs} s"),
             )
         }
     }
 
     /// Внутренняя ошибка: подробности — только в лог.
     pub fn internal(err: impl std::fmt::Display) -> Self {
-        tracing::error!(error = %err, "внутренняя ошибка");
+        tracing::error!(error = %err, "internal error");
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal",
-            "внутренняя ошибка сервера",
+            "internal server error",
         )
     }
 }
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn error_code_and_detail_reach_the_request_log() {
-        let resp = ApiError::bad_request("hash_mismatch", "содержимое не совпадает с хэшем")
+        let resp = ApiError::bad_request("hash_mismatch", "content does not match hash")
             .log_detail("received=5")
             .into_response();
         let log = resp.extensions().get::<ErrorLog>().unwrap();

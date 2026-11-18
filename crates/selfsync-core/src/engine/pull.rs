@@ -61,14 +61,14 @@ pub(crate) async fn pull(cx: &Ctx) -> SyncResult<bool> {
                 if since > 0 && (vs.seq < since || regenerated) {
                     // Сервер «моложе» клиента (восстановлен из бэкапа): полная сверка.
                     let why = if vs.seq < since {
-                        format!("сервер вернулся с seq {since} на {}", vs.seq)
+                        format!("server rolled back from seq {since} to {}", vs.seq)
                     } else {
                         format!(
-                            "сменилось поколение базы сервера ({known:016x} → {:016x}), seq {}",
+                            "server database generation changed ({known:016x} -> {:016x}), seq {}",
                             vs.generation, vs.seq
                         )
                     };
-                    cx.log(LogLevel::Warn, format!("{why}: полная сверка"));
+                    cx.log(LogLevel::Warn, format!("{why}: full reconciliation"));
                     cx.notify(Notice::ServerRewound);
                     rebaseline(cx, true);
                     cx.save().await?;
@@ -208,7 +208,7 @@ fn decode(cx: &Ctx, entries: Vec<pb::Entry>) -> Vec<Item> {
             if p.encrypted == cx.with(|s| s.encrypted()) {
                 cx.log(
                     LogLevel::Warn,
-                    format!("запись seq {} не расшифровывается — пропущена", e.seq),
+                    format!("cannot decrypt entry seq {}; skipped", e.seq),
                 );
             }
             continue;
@@ -340,7 +340,7 @@ async fn apply_batch(cx: &Ctx, entries: Vec<pb::Entry>, full_listing: bool) -> S
         let (count, limit) = cx.with(|s| (s.index.skipped.len(), s.index.max_download));
         cx.log(
             LogLevel::Info,
-            format!("не скачано файлов больше лимита ({limit} байт): {count}"),
+            format!("{count} files exceed the download limit of {limit} bytes; skipped"),
         );
         cx.notify(Notice::Skipped {
             count: u32::try_from(count).unwrap_or(u32::MAX),
@@ -413,7 +413,7 @@ async fn apply_folder(cx: &Ctx, it: &Item) -> SyncResult<bool> {
         Some(false) => {
             cx.log(
                 LogLevel::Warn,
-                format!("на сервере папка {} на месте локального файла", it.key),
+                format!("server directory {} conflicts with a local file", it.key),
             );
             Ok(false)
         }
@@ -542,7 +542,7 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
         }
     }
     let Some(hash) = r.hash else {
-        return Err(SyncError::Protocol("живая запись без хэша".into()));
+        return Err(SyncError::Protocol("live entry has no hash".into()));
     };
     let f = match f {
         Some(c) if c.clean() && edited_unnoticed(cx, key, c.local).await? => {
@@ -681,7 +681,9 @@ async fn edited_unnoticed(cx: &Ctx, key: &str, local: Option<LocalObs>) -> SyncR
     }
     cx.log(
         LogLevel::Warn,
-        format!("{key}: содержимое изменилось без смены размера и времени — локальная правка"),
+        format!(
+            "{key}: contents changed without a size or timestamp change; treating as local edit"
+        ),
     );
     cx.with_mut(|s| {
         if let Some(f) = s.index.files.get_mut(key) {
@@ -828,7 +830,7 @@ async fn apply_tombstone(cx: &Ctx, it: &Item) -> SyncResult<bool> {
     });
     cx.log(
         LogLevel::Info,
-        format!("{key} удалён на другом устройстве, но изменён здесь — возвращается"),
+        format!("{key} deleted on another device but edited locally; restoring"),
     );
     cx.notify(Notice::RestoredEdited { path: key.clone() });
     Ok(false)

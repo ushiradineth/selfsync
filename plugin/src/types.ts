@@ -141,7 +141,7 @@ export type Notice =
   | { kind: "serverRewound" }
   | { kind: "indexReset" }
   | { kind: "encryptionMismatch" }
-  /** Полный обход не нашёл `count` из `total` файлов: синк остановлен, удаления не
+  /** Полный обход не нашёл `count` из `total` файлов: sync stopped, удаления не
    *  отправлены — до возврата файлов и «Синхронизировать» или `allowDeletes`. */
   | { kind: "massDelete"; count: number; total: number }
   /** Настройки (`noMerge`) изменены здесь и на другом устройстве: оставлена версия

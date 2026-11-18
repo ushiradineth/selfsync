@@ -51,7 +51,7 @@ pub async fn revoke(
         .server_db(move |c| Ok(server::revoke_by_id(c, &vault, id)?))
         .await?;
     if ok {
-        tracing::info!(device = id, by = a.device_id, "устройство отозвано");
+        tracing::info!(device = id, by = a.device_id, "device revoked");
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::not_found("device_not_found"))
@@ -79,7 +79,7 @@ pub async fn join_create(
         _ => {
             return Err(ApiError::bad_request(
                 "bad_commit",
-                "commit — 32 байта sha256",
+                "commit must be a 32-byte SHA-256 digest",
             ));
         }
     };
@@ -118,9 +118,9 @@ pub async fn join_redeem(
     let keys = throttle::redeem_keys(&st.config.rate, ip);
     let body = axum::body::to_bytes(req.into_body(), 64 * 1024)
         .await
-        .map_err(|_| ApiError::bad_request("bad_body", "не удалось прочитать тело"))?;
+        .map_err(|_| ApiError::bad_request("bad_body", "cannot read request body"))?;
     let r = pb::JoinRedeem::decode(body)
-        .map_err(|_| ApiError::bad_request("bad_protobuf", "тело не разбирается"))?;
+        .map_err(|_| ApiError::bad_request("bad_protobuf", "cannot decode request body"))?;
     let code = r.code.trim().to_ascii_lowercase();
     let name = r.name.chars().take(128).collect::<String>();
     let st2 = st.clone();
@@ -152,7 +152,7 @@ pub async fn join_redeem(
         // Неизвестный, истёкший и уже использованный код неотличимы.
         return Err(ApiError::not_found("code_invalid"));
     };
-    tracing::info!(device = device_id, "устройство подключено по коду");
+    tracing::info!(device = device_id, "device connected using a code");
     let handoff_commit = st
         .server_db(move |c| Ok(server::joiner_commit(c, device_id)?))
         .await?
@@ -173,7 +173,7 @@ fn handoff_pk(pk: &[u8]) -> ApiResult<()> {
     } else {
         Err(ApiError::bad_request(
             "bad_handoff_key",
-            "ключ обмена — несжатая точка P-256 (65 байт)",
+            "exchange key must be an uncompressed P-256 point (65 bytes)",
         ))
     }
 }
@@ -192,7 +192,7 @@ pub async fn handoff_source(
     if !req.wrapped.is_empty() && !(28..=256).contains(&req.wrapped.len()) {
         return Err(ApiError::bad_request(
             "bad_wrapped",
-            "обёртка — от 28 до 256 байт",
+            "wrapped key must contain 28-256 bytes",
         ));
     }
     let code = req.code.trim().replace('-', "").to_ascii_lowercase();
@@ -203,7 +203,7 @@ pub async fn handoff_source(
             .server_db(move |c| Ok(server::owner_handoff_cancel(c, &vault, device, &code)?))
             .await?;
         return if ok {
-            tracing::info!(device, "обмен ключом по коду отменён источником");
+            tracing::info!(device, "key handoff cancelled by source device");
             Ok(Proto(pb::JoinHandoffSourceState::default()))
         } else {
             Err(ApiError::not_found("code_invalid"))
@@ -229,13 +229,16 @@ pub async fn handoff_source(
         Err(server::HandoffRefusal::BadCommit) => {
             return Err(ApiError::bad_request(
                 "bad_commit",
-                "ключ не совпал с обязательством кода",
+                "key does not match the connection-code commitment",
             ));
         }
     };
     let delivered = h.wrapped.is_some();
     if delivered {
-        tracing::info!(device, "ключ vault'а передан по коду");
+        tracing::info!(
+            device,
+            "vault key transferred through connection-code handoff"
+        );
     }
     Ok(Proto(pb::JoinHandoffSourceState {
         device_id: h.device.unwrap_or(0),
@@ -255,7 +258,7 @@ pub async fn handoff_joiner_put(
 ) -> ApiResult<StatusCode> {
     handoff_pk(&req.pk)?;
     if !req.mac.is_empty() && req.mac.len() != 32 {
-        return Err(ApiError::bad_request("bad_mac", "MAC — 32 байта"));
+        return Err(ApiError::bad_request("bad_mac", "MAC must be 32 bytes"));
     }
     let device = a.device_id;
     let put = st
@@ -268,7 +271,7 @@ pub async fn handoff_joiner_put(
         server::HandoffPut::Stored => Ok(StatusCode::NO_CONTENT),
         server::HandoffPut::Conflict => Err(ApiError::conflict(
             "handoff_key_set",
-            "ключ обмена уже прислан другой",
+            "a different exchange key has already been submitted",
         )),
         server::HandoffPut::NotFound => Err(ApiError::not_found("no_handoff")),
     }

@@ -19,7 +19,7 @@ use crate::state::{list_vault_dirs, open_vault, vault_dir};
 
 pub(crate) fn server_conn(config: &Config) -> anyhow::Result<rusqlite::Connection> {
     std::fs::create_dir_all(&config.data_dir)
-        .with_context(|| format!("не создаётся каталог данных {}", config.data_dir.display()))?;
+        .with_context(|| format!("cannot create data directory {}", config.data_dir.display()))?;
     let mut c = db::open(
         &config.data_dir.join("server.db"),
         config.sqlite_synchronous,
@@ -53,14 +53,14 @@ pub(crate) fn fmt_bytes(n: u64) -> String {
 
 pub fn migrate(config: &Config, only: Option<&str>) -> anyhow::Result<()> {
     server_conn(config)?;
-    println!("server.db: схема актуальна");
+    println!("server.db: schema is up to date");
     let names = match only {
         Some(v) => vec![v.to_owned()],
         None => list_vault_dirs(config),
     };
     for name in names {
         open_vault(config, &name, 1)?;
-        println!("vault {name}: схема актуальна");
+        println!("vault {name}: schema is up to date");
     }
     Ok(())
 }
@@ -75,7 +75,7 @@ pub fn vault_list(config: &Config) -> anyhow::Result<()> {
     }
     names.sort();
     if names.is_empty() {
-        println!("vault'ов нет. Создайте первый: selfsync token add --vault notes --name laptop");
+        println!("no vaults; create one with: selfsync token add --vault notes --name laptop");
     }
     for name in names {
         let v = open_vault(config, &name, 1)?;
@@ -85,7 +85,7 @@ pub fn vault_list(config: &Config) -> anyhow::Result<()> {
         let l = crate::quota::limits(&vc, &config.quota.defaults)?;
         let devices = server::count_devices(&c, &name)?;
         println!(
-            "{name}\tseq={}\tфайлов={}\tустройств={devices}{}\tзанято={}{}",
+            "{name}\tseq={}\tfiles={}\tdevices={devices}{}\tused={}{}",
             s.seq,
             s.files,
             if l.devices > 0 {
@@ -130,7 +130,7 @@ pub fn vault_regenerate(config: &Config, vault_name: Option<&str>) -> anyhow::Re
         Some(n) => {
             anyhow::ensure!(
                 vault_dir(config, n).join("meta.db").is_file(),
-                "vault {n} не найден"
+                "vault {n} not found"
             );
             vec![n.to_owned()]
         }
@@ -140,7 +140,7 @@ pub fn vault_regenerate(config: &Config, vault_name: Option<&str>) -> anyhow::Re
         let v = open_vault(config, &name, 1)?;
         let c = v.pool.get()?;
         let g = vault::new_generation(&c)?;
-        println!("vault {name}: новое поколение {g:016x}");
+        println!("vault {name}: new generation {g:016x}");
     }
     Ok(())
 }
@@ -148,7 +148,7 @@ pub fn vault_regenerate(config: &Config, vault_name: Option<&str>) -> anyhow::Re
 pub fn vault_quota(config: &Config, vault_name: &str, p: &QuotaPatch) -> anyhow::Result<()> {
     anyhow::ensure!(
         server::valid_vault_name(vault_name),
-        "имя vault'а должно быть [a-z0-9-]{{1,64}}"
+        "vault name must match [a-z0-9-]{{1,64}}"
     );
     let v = open_vault(config, vault_name, 1)?;
     let c = v.pool.get()?;
@@ -161,14 +161,14 @@ pub fn vault_quota(config: &Config, vault_name: &str, p: &QuotaPatch) -> anyhow:
         Some("default") => None,
         Some(s) => Some(
             s.parse()
-                .with_context(|| format!("--devices: нужно целое число ≥ 0, получено «{s}»"))?,
+                .with_context(|| format!("--devices: expected an integer >= 0, received {s}"))?,
         ),
     };
     let d = config.quota.defaults;
     let (soft, hard) = (own.soft.unwrap_or(d.soft), own.hard.unwrap_or(d.hard));
     if soft > 0 && hard > 0 && soft > hard {
         bail!(
-            "мягкий порог ({}) больше жёсткого ({})",
+            "soft limit ({}) exceeds hard limit ({})",
             fmt_bytes(soft),
             fmt_bytes(hard)
         );
@@ -179,24 +179,24 @@ pub fn vault_quota(config: &Config, vault_name: &str, p: &QuotaPatch) -> anyhow:
     let sc = server_conn(config)?;
     let devices = server::count_devices(&sc, vault_name)?;
     let show = |n: u64, own: Option<u64>, f: &dyn Fn(u64) -> String| {
-        let v = if n == 0 { "нет".to_owned() } else { f(n) };
+        let v = if n == 0 { "none".to_owned() } else { f(n) };
         if own.is_some() {
             v
         } else {
-            format!("{v} (по умолчанию)")
+            format!("{v} (default)")
         }
     };
     println!("vault «{vault_name}»");
-    println!("занято:         {}", fmt_bytes(used));
-    println!("мягкий порог:   {}", show(l.soft, own.soft, &fmt_bytes));
-    println!("жёсткий порог:  {}", show(l.hard, own.hard, &fmt_bytes));
+    println!("used:          {}", fmt_bytes(used));
+    println!("soft limit:    {}", show(l.soft, own.soft, &fmt_bytes));
+    println!("hard limit:    {}", show(l.hard, own.hard, &fmt_bytes));
     println!(
-        "устройств:      {devices} из {}",
+        "devices:       {devices} of {}",
         show(u64::from(l.devices), own.devices.map(u64::from), &|n| n
             .to_string())
     );
     println!(
-        "наибольший файл: {}",
+        "largest file:  {}",
         fmt_bytes(crate::quota::max_file(&l, config))
     );
     Ok(())
@@ -206,7 +206,7 @@ pub fn vault_quota(config: &Config, vault_name: &str, p: &QuotaPatch) -> anyhow:
 fn vault_device_limit(config: &Config, vault_name: &str) -> anyhow::Result<u32> {
     anyhow::ensure!(
         server::valid_vault_name(vault_name),
-        "имя vault'а должно быть [a-z0-9-]{{1,64}}"
+        "vault name must match [a-z0-9-]{{1,64}}"
     );
     let v = open_vault(config, vault_name, 1)?;
     let c = v.pool.get()?;
@@ -222,14 +222,13 @@ pub fn token_add(
     let c = server_conn(config)?;
     let limit = vault_device_limit(config, vault_name)?;
     let (id, token) = server::add_device(&c, vault_name, name, read_only, limit)?;
-    println!("Устройство #{id} «{name}» добавлено в vault «{vault_name}».");
+    println!("Device #{id} ({name}) added to vault {vault_name}.");
     if read_only {
         println!(
-            "Только для чтения: нужен плагин или selfsync-cli 0.2.1+ (со старыми версиями \
-             сервер не работает, и они просят обновиться)."
+            "Read-only access requires plugin or selfsync-cli 0.2.1+; older clients will be asked to upgrade."
         );
     }
-    println!("Токен (показывается один раз):");
+    println!("Token (shown once):");
     println!("{token}");
     Ok(())
 }
@@ -238,31 +237,23 @@ pub fn token_list(config: &Config, vault_name: Option<&str>) -> anyhow::Result<(
     let c = server_conn(config)?;
     let rows = server::list_devices(&c, vault_name)?;
     if rows.is_empty() {
-        println!("устройств нет");
+        println!("no devices");
     }
     for d in rows {
         println!(
-            "#{}\t{}\t{}\tсоздано {}\tбыл {}\t{}\t{}\t{}",
+            "#{}\t{}\t{}\tcreated {}\tlast seen {}\t{}\t{}\t{}",
             d.id,
             d.vault,
             d.name,
             fmt_time(d.created_at),
             fmt_time(d.last_seen),
             if d.client.is_empty() {
-                "клиент неизвестен"
+                "unknown client"
             } else {
                 &d.client
             },
-            if d.read_only {
-                "чтение"
-            } else {
-                "запись"
-            },
-            if d.revoked {
-                "ОТОЗВАН"
-            } else {
-                "активен"
-            }
+            if d.read_only { "read" } else { "write" },
+            if d.revoked { "REVOKED" } else { "active" }
         );
     }
     Ok(())
@@ -272,9 +263,9 @@ pub fn token_revoke(config: &Config, vault_name: Option<&str>, name: &str) -> an
     let c = server_conn(config)?;
     let n = server::revoke_by_name(&c, vault_name, name)?;
     if n == 0 {
-        bail!("активных устройств с именем «{name}» не найдено");
+        bail!("no active devices named {name}");
     }
-    println!("отозвано устройств: {n}");
+    println!("devices revoked: {n}");
     Ok(())
 }
 
@@ -320,24 +311,20 @@ pub fn link(
     let base = url
         .map(str::to_owned)
         .or_else(|| config.public_url.clone())
-        .context("нужен внешний адрес: --url https://notes.example.com или SELFSYNC_PUBLIC_URL")?;
+        .context("external URL required: --url https://notes.example.com or SELFSYNC_PUBLIC_URL")?;
     let base = base.trim_end_matches('/');
     let c = server_conn(config)?;
     server::check_device_limit(&c, vault_name, vault_device_limit(config, vault_name)?)?;
     let (code, expires) = server::create_join_code(&c, vault_name, name, None, read_only)?;
     let link = format!("{base}/join/{code}");
     println!(
-        "Ссылка подключения «{name}» к vault'у «{vault_name}»{} (одноразовая, до {}):",
-        if read_only {
-            " только для чтения"
-        } else {
-            ""
-        },
+        "Connect {name} to vault {vault_name}{} (one use, expires {}):",
+        if read_only { " read-only" } else { "" },
         fmt_time(expires)
     );
     println!("{link}\n");
     print!("{}", render_qr(&link)?);
-    println!("\nКод для ручного ввода: {code}");
+    println!("\nManual connection code: {code}");
     Ok(())
 }
 
@@ -378,7 +365,7 @@ fn put_plain_file(store: &BlobStore, path: &Path) -> anyhow::Result<(Hash, u64)>
     drop(out);
     if total != len {
         let _ = std::fs::remove_file(&tmp);
-        bail!("файл изменился во время импорта: {}", path.display());
+        bail!("file changed during import: {}", path.display());
     }
     let hash = h.finish();
     store.finalize(&tmp, &hash)?;
@@ -400,12 +387,12 @@ pub fn import(
     from: &Path,
     max_blob: u64,
 ) -> anyhow::Result<ImportReport> {
-    anyhow::ensure!(from.is_dir(), "{} — не каталог", from.display());
+    anyhow::ensure!(from.is_dir(), "{} is not a directory", from.display());
     let v = open_vault(config, vault_name, 1)?;
     let mut c = v.pool.get()?;
     if vault::meta_blob(&c, "vault_key")?.is_some() {
         bail!(
-            "vault зашифрован: импорт открытым текстом запрещён. Импортируйте до включения шифрования."
+            "vault is encrypted: plaintext import is forbidden; import before enabling encryption"
         );
     }
     let mut report = ImportReport::default();
@@ -456,7 +443,7 @@ pub fn import(
             let rel = p.strip_prefix(from)?.to_string_lossy().replace('\\', "/");
             let ft = e.file_type()?;
             if ft.is_symlink() {
-                report.skipped.push((rel, "символическая ссылка".into()));
+                report.skipped.push((rel, "symbolic link".into()));
                 continue;
             }
             let vp = match VaultPath::normalize(&rel) {
@@ -476,7 +463,7 @@ pub fn import(
             } else if ft.is_file() {
                 let md = e.metadata()?;
                 if md.len() > max_blob {
-                    report.skipped.push((rel, "больше лимита размера".into()));
+                    report.skipped.push((rel, "exceeds size limit".into()));
                     continue;
                 }
                 let (hash, size) = put_plain_file(&v.blobs, &p)?;
@@ -518,37 +505,34 @@ pub fn gc(
         let mut c = v.pool.get()?;
         let plan = gc::plan(&c, &v.blobs, opts, now)?;
         println!("vault {name}:");
-        println!("  ревизий истории к удалению:   {}", plan.revisions.len());
-        println!("  tombstone'ов (с историей):    {}", plan.tombstones.len());
-        println!("  блобов без ссылок:            {}", plan.blobs.len());
+        println!("  history revisions to remove: {}", plan.revisions.len());
+        println!("  tombstones (with history):   {}", plan.tombstones.len());
+        println!("  unreferenced blobs:          {}", plan.blobs.len());
         println!(
-            "  брошенных загрузок:           {}",
+            "  abandoned uploads:          {}",
             plan.uploads.len() + plan.stray_files.len()
         );
-        println!(
-            "  освободится:                  {}",
-            fmt_bytes(plan.bytes())
-        );
+        println!("  space to reclaim:           {}", fmt_bytes(plan.bytes()));
         if plan.is_empty() {
             continue;
         }
         if execute {
             let r = gc::execute(&mut c, &v.blobs, &plan)?;
             println!(
-                "  выполнено: ревизий {}, tombstone'ов {}, блобов {}, загрузок {}",
+                "  removed: {} revisions, {} tombstones, {} blobs, {} uploads",
                 r.revisions, r.tombstones, r.blobs, r.uploads
             );
         }
     }
     if !execute {
-        println!("\nЭто только план. Чтобы удалить, запустите с --yes.");
+        println!("\nThis is a plan only. Run with --yes to delete.");
     }
     Ok(())
 }
 
 pub fn sweep(config: &Config) -> anyhow::Result<()> {
     for (name, r) in crate::sweep::sweep_all(config)? {
-        println!("vault {name}: стёрто путей {}, блобов {}", r.paths, r.blobs);
+        println!("vault {name}: erased {} paths, {} blobs", r.paths, r.blobs);
     }
     Ok(())
 }
@@ -565,13 +549,13 @@ pub fn verify(
     let names = list_vault_dirs(config);
     let names = match only {
         Some(v) if names.iter().any(|n| n == v) => vec![v.to_owned()],
-        Some(v) => bail!("vault «{v}» не найден в {}", config.data_dir.display()),
+        Some(v) => bail!("vault {v} not found in {}", config.data_dir.display()),
         None => names,
     };
     if let Some(dir) = repair_from
         && !dir.is_dir()
     {
-        bail!("каталог бэкапа {} не найден", dir.display());
+        bail!("backup directory {} not found", dir.display());
     }
     let mut clean = true;
     let server_db = config.data_dir.join("server.db");
@@ -581,7 +565,7 @@ pub fn verify(
             println!("server.db: {e}");
         }
         if errors.is_empty() && !quiet {
-            println!("server.db: в порядке");
+            println!("server.db: OK");
         }
         clean &= errors.is_empty();
     }
@@ -593,8 +577,7 @@ pub fn verify(
         let r = crate::verify::verify_vault(config, &name, opts)?;
         if !quiet {
             println!(
-                "vault {name}: блобов {} ({}), битых {}, отсутствующих {}, без ссылок {} ({}), \
-                 брошенных загрузок {}, {:.1} с",
+                "vault {name}: {} blobs ({}), {} damaged, {} missing, {} unreferenced ({}), {} abandoned uploads, {:.1} s",
                 r.blobs,
                 fmt_bytes(r.bytes),
                 r.corrupt.len(),
@@ -606,35 +589,34 @@ pub fn verify(
             );
         }
         for e in &r.db_errors {
-            println!("vault {name}: база: {e}");
+            println!("vault {name}: database: {e}");
         }
         if let Some(k) = &r.key_problem {
             println!("vault {name}: {k}");
         }
         for h in &r.corrupt {
-            println!("vault {name}: битый блоб {}", h.to_hex());
+            println!("vault {name}: damaged blob {}", h.to_hex());
         }
         for m in &r.missing {
             println!(
-                "vault {name}: нет блоба {} ({})",
+                "vault {name}: missing blob {} ({})",
                 m.hash.to_hex(),
                 m.paths.join(", ")
             );
         }
         for (h, why) in &r.unrepaired {
-            println!("vault {name}: не восстановлен {}: {why}", h.to_hex());
+            println!("vault {name}: {} could not be restored: {why}", h.to_hex());
         }
         if !r.wanted.is_empty() {
             let now = db::now_ms();
             println!(
-                "vault {name}: запрошено у устройств {} (битые убраны в quarantine/): \
-                 устройство с целым файлом зальёт его при следующем синке",
+                "vault {name}: requested {} blobs from devices (damaged copies moved to quarantine/); a device with an intact file will upload it on its next sync",
                 r.wanted.len()
             );
             for (h, since) in &r.wanted {
                 if now - since > crate::db::vault::DAY_MS {
                     println!(
-                        "vault {name}: ждёт устройств дольше суток {} (с {})",
+                        "vault {name}: {} blobs waiting for devices for over a day (since {})",
                         h.to_hex(),
                         fmt_time(*since)
                     );
@@ -643,14 +625,16 @@ pub fn verify(
         }
         if !quiet {
             for h in &r.repaired {
-                println!("vault {name}: восстановлен из бэкапа {}", h.to_hex());
+                println!("vault {name}: restored from backup {}", h.to_hex());
             }
             if r.orphans > 0 || r.uploads > 0 {
-                println!("  блобы без ссылок и брошенные загрузки убирает `selfsync gc --yes`");
+                println!(
+                    "  remove unreferenced blobs and abandoned uploads with `selfsync gc --yes`"
+                );
             }
             if repair_from.is_none() && !(r.corrupt.is_empty() && r.missing.is_empty()) {
                 println!(
-                    "  восстановить из бэкапа: `selfsync verify --repair-from <каталог бэкапа>`"
+                    "  restore from backup: `selfsync verify --repair-from <backup-directory>`"
                 );
             }
         }
@@ -701,7 +685,7 @@ impl BlobSource<'_> {
 pub fn backup(config: &Config, dest: &Path, blobs: BlobSource<'_>) -> anyhow::Result<()> {
     if dest.join("server.db").exists() {
         bail!(
-            "{} уже содержит бэкап — укажите пустой каталог",
+            "{} already contains a backup; choose an empty directory",
             dest.display()
         );
     }
@@ -745,11 +729,11 @@ pub fn backup(config: &Config, dest: &Path, blobs: BlobSource<'_>) -> anyhow::Re
             }
         }
         println!(
-            "vault {name}: скопирован ({})",
+            "vault {name}: copied ({})",
             vault_dir(config, &name).display()
         );
     }
-    println!("бэкап готов: {} (блобов: {count})", dest.display());
+    println!("backup complete: {} (blobs: {count})", dest.display());
     Ok(())
 }
 
@@ -796,10 +780,10 @@ pub fn rotation_list(root: &Path) -> io::Result<Vec<PathBuf>> {
 /// прерванный бэкап не вытесняет целую копию.
 pub fn backup_rotate(config: &Config, root: &Path, keep: usize, copy: bool) -> anyhow::Result<()> {
     if keep == 0 {
-        bail!("--keep должен быть не меньше 1");
+        bail!("--keep must be at least 1");
     }
     std::fs::create_dir_all(root)
-        .with_context(|| format!("не создаётся каталог {}", root.display()))?;
+        .with_context(|| format!("cannot create directory {}", root.display()))?;
     // Недописанные копии прошлых запусков.
     for e in std::fs::read_dir(root)?.flatten() {
         let n = e.file_name();
@@ -832,10 +816,10 @@ pub fn backup_rotate(config: &Config, root: &Path, keep: usize, copy: bool) -> a
     let extra = all.len().saturating_sub(keep);
     for old in &all[..extra] {
         std::fs::remove_dir_all(old)
-            .with_context(|| format!("не удаляется старая копия {}", old.display()))?;
-        println!("удалена старая копия {}", old.display());
+            .with_context(|| format!("cannot remove old backup {}", old.display()))?;
+        println!("removed old backup {}", old.display());
     }
-    println!("копия: {}", done.display());
+    println!("backup: {}", done.display());
     Ok(())
 }
 
@@ -861,12 +845,12 @@ fn healthcheck_inner(url: &str) -> anyhow::Result<bool> {
         #[cfg(not(unix))]
         {
             let _ = rest;
-            bail!("unix-сокеты не поддерживаются");
+            bail!("Unix sockets are not supported");
         }
     } else {
         let rest = url
             .strip_prefix("http://")
-            .context("поддерживается только http:// или unix:")?;
+            .context("only http:// and unix: are supported")?;
         let (hostport, path) = match rest.find('/') {
             Some(i) => (&rest[..i], &rest[i..]),
             None => (rest, "/v1/health"),
@@ -875,7 +859,7 @@ fn healthcheck_inner(url: &str) -> anyhow::Result<bool> {
         let addr = hostport
             .to_socket_addrs()?
             .next()
-            .context("адрес не разрешается")?;
+            .context("address could not be resolved")?;
         let mut s = std::net::TcpStream::connect_timeout(&addr, timeout)?;
         s.set_read_timeout(Some(timeout))?;
         s.write_all(request(hostport, path).as_bytes())?;

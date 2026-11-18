@@ -124,10 +124,7 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
                 }
                 // Ключ записан, а миграцию никто не ведёт (включавшее устройство не
                 // получило ответ или было убито до чекпоинта): доводим её сами.
-                cx.log(
-                    LogLevel::Warn,
-                    "шифрование включено не до конца: доводим перезаливку",
-                );
+                cx.log(LogLevel::Warn, "encryption is incomplete; resuming upload");
                 cx.with_mut(|s| {
                     s.index.migration = Some(MigrationState {
                         key_version: vs.key_version,
@@ -140,7 +137,7 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
             }
             cx.log(
                 LogLevel::Info,
-                "vault зашифрован: переход в зашифрованный режим",
+                "vault is encrypted; switching to encrypted mode",
             );
             switch_to_encrypted(cx, vs.key_version);
             cx.save().await?;
@@ -197,7 +194,7 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
                 }
                 cx.log(
                     LogLevel::Warn,
-                    "смена ключа не доведена: продолжаем перешифровку",
+                    "key rotation is incomplete; resuming re-encryption",
                 );
                 cx.with_mut(|s| {
                     s.index.migration = Some(MigrationState {
@@ -215,7 +212,7 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
                 // поколения, что данные (проверен по записи) — перейти на него.
                 cx.log(
                     LogLevel::Info,
-                    format!("ключ шифрования сменён: поколение {server_epoch}, полная сверка"),
+                    format!("encryption key rotated: epoch {server_epoch}, full reconciliation"),
                 );
                 switch_epoch(cx, server_epoch);
                 cx.save().await?;
@@ -311,7 +308,7 @@ pub(crate) async fn unlock(cx: &Ctx, password: String, remember: bool) -> SyncRe
     if vk.record.is_empty() {
         cx.notify(Notice::Error {
             code: "no_vault_key".into(),
-            message: "vault не зашифрован".into(),
+            message: "vault is not encrypted".into(),
         });
         return Ok(());
     }
@@ -324,7 +321,7 @@ pub(crate) async fn unlock(cx: &Ctx, password: String, remember: bool) -> SyncRe
                 s.verified_version = vk.version;
             });
             set_master(cx, master, remember, true, epoch);
-            cx.log(LogLevel::Info, "ключ шифрования раскрыт");
+            cx.log(LogLevel::Info, "encryption key unlocked");
             cx.with_mut(|s| s.sync_due = Some(s.now));
             Ok(())
         }
@@ -354,7 +351,7 @@ pub(crate) async fn change_password(cx: &Ctx, old: String, new: String) -> SyncR
         if vk.record.is_empty() {
             cx.notify(Notice::Error {
                 code: "no_vault_key".into(),
-                message: "vault не зашифрован".into(),
+                message: "vault is not encrypted".into(),
             });
             return Ok(());
         }
@@ -386,9 +383,7 @@ pub(crate) async fn change_password(cx: &Ctx, old: String, new: String) -> SyncR
             return Ok(());
         }
     }
-    Err(SyncError::Protocol(
-        "запись ключа постоянно меняется".into(),
-    ))
+    Err(SyncError::Protocol("key record keeps changing".into()))
 }
 
 fn crypto_err(e: CryptoError) -> SyncError {
@@ -417,7 +412,7 @@ async fn rewrite_vault_key<T>(
             return Err(SyncError::Http {
                 status: 400,
                 code: "no_vault_key".into(),
-                message: "vault не зашифрован".into(),
+                message: "vault is not encrypted".into(),
             });
         }
         let (record, out) = make(&vk.record).map_err(crypto_err)?;
@@ -435,9 +430,7 @@ async fn rewrite_vault_key<T>(
             return Ok(out);
         }
     }
-    Err(SyncError::Protocol(
-        "запись ключа постоянно меняется".into(),
-    ))
+    Err(SyncError::Protocol("key record keeps changing".into()))
 }
 
 /// Создать фразу восстановления (новая заменяет прежнюю).
@@ -446,7 +439,7 @@ pub(crate) async fn create_recovery(cx: &Ctx, password: String) -> SyncResult<Ui
     let now = cx.now();
     let entropy =
         rewrite_vault_key(cx, |rec| crypto::add_recovery(rec, &password, kdf, now)).await?;
-    cx.log(LogLevel::Info, "создана фраза восстановления");
+    cx.log(LogLevel::Info, "recovery phrase created");
     Ok(UiResult::RecoveryPhrase {
         words: Phrase(entropy.words()),
     })
@@ -460,7 +453,7 @@ pub(crate) async fn remove_recovery(cx: &Ctx, password: String) -> SyncResult<Ui
         crypto::remove_recovery(rec, &password, kdf, now).map(|r| (r, ()))
     })
     .await?;
-    cx.log(LogLevel::Info, "фраза восстановления удалена");
+    cx.log(LogLevel::Info, "recovery phrase removed");
     Ok(UiResult::Ok)
 }
 
@@ -489,7 +482,7 @@ pub(crate) async fn recover(
     set_master(cx, master, remember, false, epoch);
     cx.log(
         LogLevel::Info,
-        "доступ восстановлен фразой: задан новый пароль",
+        "access recovered using phrase; new password set",
     );
     cx.notify(Notice::PasswordChanged);
     cx.with_mut(|s| s.sync_due = Some(s.now));
@@ -543,7 +536,7 @@ pub(crate) async fn enable(
     });
     cx.save().await?;
     api::put_migration(cx, resp.version, 0).await?;
-    cx.log(LogLevel::Info, "шифрование включено: перезаливка vault'а");
+    cx.log(LogLevel::Info, "encryption enabled; uploading vault again");
     migrate(cx).await
 }
 
@@ -578,14 +571,14 @@ pub(crate) async fn rekey(cx: &Ctx, password: String, remember: bool) -> SyncRes
     if !same {
         cx.notify(Notice::Error {
             code: "bad_vault_key".into(),
-            message: "ключ на устройстве не совпадает с записью на сервере".into(),
+            message: "device key does not match server key record".into(),
         });
         return Ok(());
     }
     let Some(resp) = api::put_vault_key(cx, rk.record, vk.version).await? else {
         cx.notify(Notice::Error {
             code: "key_changed".into(),
-            message: "запись ключа изменилась на другом устройстве — повторите".into(),
+            message: "key record changed on another device; retry".into(),
         });
         return Ok(());
     };
@@ -614,7 +607,7 @@ pub(crate) async fn rekey(cx: &Ctx, password: String, remember: bool) -> SyncRes
     api::put_migration(cx, resp.version, epoch).await?;
     cx.log(
         LogLevel::Info,
-        format!("ключ шифрования сменён: перешифровка vault'а (поколение {epoch})"),
+        format!("encryption key rotated; re-encrypting vault (epoch {epoch})"),
     );
     migrate(cx).await
 }
@@ -672,9 +665,7 @@ async fn finish_record(cx: &Ctx) -> SyncResult<()> {
             return Ok(());
         }
     }
-    Err(SyncError::Protocol(
-        "запись ключа постоянно меняется".into(),
-    ))
+    Err(SyncError::Protocol("key record keeps changing".into()))
 }
 
 /// Перезаливка открытых записей зашифрованными; продолжается после перезапуска.
@@ -692,7 +683,7 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
             .vault
             .unwrap_or_default();
         if vs.key_epoch >= state.to_epoch {
-            cx.log(LogLevel::Info, "смену ключа довело другое устройство");
+            cx.log(LogLevel::Info, "another device completed key rotation");
             cx.with_mut(|s| s.index.migration = None);
             switch_epoch(cx, vs.key_epoch);
             cx.save().await?;
@@ -730,7 +721,7 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
                 // Без полной перезаливки purge стёр бы неперезалитое: повтор в
                 // следующем цикле.
                 return Err(SyncError::Io(
-                    "миграция: перезалито не всё, повтор позже".into(),
+                    "migration: some files remain to upload; retrying later".into(),
                 ));
             }
         }
@@ -742,7 +733,7 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
             // Перезаливка ничего не добавила, а сервер снова отказал: на нём записи,
             // которые здесь не прочитать. Не крутиться — повтор в следующем цикле.
             return Err(SyncError::Io(
-                "миграция: на сервере записи, которые не удалось перешифровать".into(),
+                "migration: some server entries could not be re-encrypted".into(),
             ));
         }
         refused = Some(max_seq);
@@ -760,14 +751,14 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
         cx.with_mut(|s| s.index.migration = None);
         cx.save().await?;
         cx.notify(Notice::RekeyDone);
-        cx.log(LogLevel::Info, "смена ключа завершена");
+        cx.log(LogLevel::Info, "key rotation completed");
         return Err(SyncError::Restart);
     }
     let kv = state.key_version;
     switch_to_encrypted(cx, kv);
     cx.save().await?;
     cx.notify(Notice::EncryptionEnabled);
-    cx.log(LogLevel::Info, "миграция на шифрование завершена");
+    cx.log(LogLevel::Info, "encryption migration completed");
     Err(SyncError::Restart)
 }
 
@@ -889,10 +880,7 @@ async fn upload_all(cx: &Ctx, src: Option<&VaultKeys>) -> SyncResult<bool> {
                 match reencrypt_big(cx, k, &h, e.size, &keys, src).await? {
                     Some(b) => b,
                     None => {
-                        cx.log(
-                            LogLevel::Error,
-                            format!("миграция: не удалось перезалить {k}"),
-                        );
+                        cx.log(LogLevel::Error, format!("migration: could not upload {k}"));
                         complete = false;
                         continue;
                     }
@@ -902,7 +890,7 @@ async fn upload_all(cx: &Ctx, src: Option<&VaultKeys>) -> SyncResult<bool> {
                     // Блоба нет на сервере: спасать нечего, purge не блокируем.
                     cx.log(
                         LogLevel::Error,
-                        format!("миграция: блоб {k} пропал на сервере"),
+                        format!("migration: blob {k} disappeared from server"),
                     );
                     mark_done(cx, k, e.seq);
                     continue;
@@ -951,11 +939,13 @@ async fn upload_all(cx: &Ctx, src: Option<&VaultKeys>) -> SyncResult<bool> {
                         .map(|l| vp.with_suffix(&l).as_str().to_owned())
                         .find(|c| !taken.contains(c))
                         .ok_or_else(|| {
-                            SyncError::Io(format!("миграция: нет свободного имени для копии {k}"))
+                            SyncError::Io(format!(
+                                "migration: no available filename for copy of {k}"
+                            ))
                         })?;
                     cx.log(
                         LogLevel::Warn,
-                        format!("миграция: открытая версия {k} сохранена копией {copy}"),
+                        format!("migration: plaintext version of {k} saved as {copy}"),
                     );
                     taken.insert(copy.clone());
                     let cp = VaultPath::parse(&copy).map_err(|er| SyncError::Io(er.to_string()))?;
@@ -987,7 +977,10 @@ async fn upload_all(cx: &Ctx, src: Option<&VaultKeys>) -> SyncResult<bool> {
                 other => {
                     // Conflict: зашифрованная запись сменилась после листинга —
                     // разберёмся на следующем проходе.
-                    cx.log(LogLevel::Warn, format!("миграция {k}: {other:?}, повтор"));
+                    cx.log(
+                        LogLevel::Warn,
+                        format!("migration {k}: {other:?}; retrying"),
+                    );
                     complete = false;
                 }
             }

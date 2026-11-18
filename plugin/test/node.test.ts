@@ -16,6 +16,63 @@ const ANY = { kind: "any" } as const;
 
 const bytes = (s: string): Uint8Array => new TextEncoder().encode(s);
 
+test("temporary writes cannot follow symbolic or hard links outside the vault", async () => {
+  await withVault(async (root) => {
+    const vault = join(root, "vault");
+    const outside = join(root, "outside.md");
+    await realFsp.writeFile(outside, "original");
+    const fs = new NodeBackend(vault, join(root, "store"), realFsp, { caseSensitive: true });
+    for (const kind of ["symlink", "hardlink"] as const) {
+      const temp = join(vault, "note.md.selfsync-tmp");
+      if (kind === "symlink") await realFsp.symlink(outside, temp);
+      else await realFsp.link(outside, temp);
+      await fs.list();
+      await assert.rejects(fs.writeAtomic("note.md", bytes("replacement"), { kind: "absent" }));
+      assert.equal(await realFsp.readFile(outside, "utf8"), "original");
+      await assert.rejects(realFsp.stat(join(vault, "note.md")), { code: "ENOENT" });
+      await realFsp.unlink(temp);
+    }
+    await fs.writeAtomic("note.md", bytes("safe write"), { kind: "absent" });
+    assert.equal(await realFsp.readFile(join(vault, "note.md"), "utf8"), "safe write");
+  });
+});
+
+test("a directory replaced by a symlink is rejected immediately after a scan", async () => {
+  await withVault(async (root) => {
+    const vault = join(root, "vault");
+    const outside = join(root, "outside");
+    await realFsp.mkdir(join(vault, "folder"));
+    await realFsp.mkdir(outside);
+    const fs = new NodeBackend(vault, join(root, "store"), realFsp, { caseSensitive: true });
+    await fs.list();
+    await realFsp.rmdir(join(vault, "folder"));
+    await realFsp.symlink(outside, join(vault, "folder"));
+    await assert.rejects(fs.writeAtomic("folder/note.md", bytes("remote"), { kind: "absent" }));
+    assert.deepEqual(await realFsp.readdir(outside), []);
+  });
+});
+
+test("resumed downloads and plugin storage reject planted links", async () => {
+  await withVault(async (root) => {
+    const outside = join(root, "outside.md");
+    const store = join(root, "store");
+    await realFsp.writeFile(outside, "original");
+    await realFsp.mkdir(join(store, "tmp"), { recursive: true });
+    const fs = new NodeBackend(join(root, "vault"), store, realFsp, { caseSensitive: true });
+    for (const symbolic of [true, false]) {
+      const temp = join(store, "tmp", "download");
+      if (symbolic) await realFsp.symlink(outside, temp);
+      else await realFsp.link(outside, temp);
+      await assert.rejects(fs.tempWrite("download", 2, bytes("replacement")));
+      assert.equal(await realFsp.readFile(outside, "utf8"), "original");
+      await realFsp.unlink(temp);
+    }
+    await realFsp.symlink(root, join(store, "cache"));
+    await assert.rejects(fs.storeWrite("cache/outside.md", bytes("replacement")));
+    assert.equal(await realFsp.readFile(outside, "utf8"), "original");
+  });
+});
+
 /** Действие без `id` (по каждому варианту объединения). */
 type WithoutId<A> = A extends unknown ? Omit<A, "id"> : never;
 

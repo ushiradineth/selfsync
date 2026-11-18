@@ -83,7 +83,10 @@ pub async fn run_once(dir: &Path, cfg: &HookConfig, batch: &Batch) {
         text.push('\n');
     }
     if let Err(e) = std::fs::write(&list, text) {
-        tracing::warn!("хук: список изменений не записан ({}): {e}", list.display());
+        tracing::warn!(
+            "hook: could not write change list ({}): {e}",
+            list.display()
+        );
     }
     let mut cmd = shell(&cfg.command);
     cmd.current_dir(dir)
@@ -98,21 +101,21 @@ pub async fn run_once(dir: &Path, cfg: &HookConfig, batch: &Batch) {
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!("хук не запустился: {e}");
+            tracing::error!("hook could not start: {e}");
             return;
         }
     };
     tracing::info!(
-        "хук: {} (пришло {}, отправлено {}, путей {})",
+        "hook: {} ({} pulled, {} pushed, {} paths)",
         cfg.command,
         batch.pulled,
         batch.pushed,
         batch.paths.len()
     );
     match tokio::time::timeout(cfg.timeout, child.wait()).await {
-        Ok(Ok(st)) if st.success() => tracing::info!("хук выполнен"),
-        Ok(Ok(st)) => tracing::warn!("хук завершился с ошибкой: {st}"),
-        Ok(Err(e)) => tracing::warn!("хук: {e}"),
+        Ok(Ok(st)) if st.success() => tracing::info!("hook completed"),
+        Ok(Ok(st)) => tracing::warn!("hook exited with error: {st}"),
+        Ok(Err(e)) => tracing::warn!("hook: {e}"),
         Err(_) => {
             // Вся группа: `sh -c` мог запустить дочерние процессы.
             #[cfg(unix)]
@@ -124,7 +127,7 @@ pub async fn run_once(dir: &Path, cfg: &HookConfig, batch: &Batch) {
             }
             let _ = child.kill().await;
             tracing::warn!(
-                "хук не уложился в {} и остановлен",
+                "hook exceeded {} and was stopped",
                 humantime::format_duration(cfg.timeout)
             );
         }

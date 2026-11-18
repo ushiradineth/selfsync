@@ -1,7 +1,7 @@
 #!/bin/sh
 # Установка selfsync одной командой: Debian, Ubuntu, Fedora с systemd.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Darkildo/selfsync/main/deploy/install.sh \
+#   curl -fsSL https://raw.githubusercontent.com/ushiradineth/selfsync/main/deploy/install.sh \
 #     | sudo sh -s -- --domain notes.example.com
 #
 # Ставит сервер из релиза server-X.Y.Z (сверяет SHA256SUMS), юниты systemd (сервер по
@@ -23,7 +23,7 @@
 # SELFSYNC_ROOT — корень для файлов (тесты); по умолчанию /.
 set -eu
 
-REPO=Darkildo/selfsync
+REPO=ushiradineth/selfsync
 ROOT=${SELFSYNC_ROOT:-}
 VERSION=""
 DOMAIN=""

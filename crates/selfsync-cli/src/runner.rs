@@ -57,7 +57,7 @@ fn reason_text(s: &SyncStatus) -> String {
     match s.reason.as_deref() {
         Some("rate_limited") => {
             let secs = ((s.retry_at - now_ms()).max(0) + 999) / 1000;
-            format!("сервер ограничил попытки, следующая через {secs} с")
+            format!("server rate-limited attempts; retrying in {secs} s")
         }
         Some(r) => r.to_owned(),
         None => String::new(),
@@ -149,14 +149,13 @@ impl Loop {
                     && m < selfsync_core::proto::PROTO_MINOR
                 {
                     tracing::warn!(
-                        "сервер старее клиента (протокол {}.{m}, у клиента {}): часть \
-                         возможностей недоступна, обновите сервер",
+                        "server is older than client (protocol {}.{m}, client {}); some features are unavailable; upgrade the server",
                         selfsync_core::proto::PROTO_VERSION,
                         selfsync_core::proto::proto_header()
                     );
                 }
                 if status.state != self.status.state || status.retry_at != self.status.retry_at {
-                    tracing::info!("состояние: {:?} ({})", status.state, reason_text(&status));
+                    tracing::info!("state: {:?} ({})", status.state, reason_text(&status));
                 }
                 self.status = status;
             }
@@ -181,7 +180,7 @@ impl Loop {
             },
             Action::RememberKey { key } => {
                 if let Err(e) = write_private(&self.key_path, &key) {
-                    tracing::warn!("ключ не сохранён: {e}");
+                    tracing::warn!("key could not be saved: {e}");
                 }
             }
             Action::ForgetKey => {
@@ -218,8 +217,7 @@ impl Loop {
 /// — в stderr. Больше нигде она не появляется.
 pub fn print_phrase(words: &selfsync_core::engine::Phrase) {
     eprintln!(
-        "Фраза восстановления (показывается один раз; запишите её и храните отдельно от \
-         пароля — она раскрывает vault так же, как пароль):"
+        "Recovery phrase (shown once; write it down and store it separately from your password; it unlocks the vault):"
     );
     for (i, w) in words.0.iter().enumerate() {
         println!("{:2}. {w}", i + 1);
@@ -246,7 +244,7 @@ pub async fn folder_command(dir: &Path, cfg: &Config, cmd: UiCommand) -> anyhow:
         }
         match tokio::time::timeout(Duration::from_secs(300), rx.recv()).await {
             Ok(Some(ev)) => lp.feed(ev),
-            _ => anyhow::bail!("сервер не ответил"),
+            _ => anyhow::bail!("server did not respond"),
         }
     }
 }
@@ -268,32 +266,33 @@ pub struct ServerState {
 fn notify_user(n: &Notice) {
     match n {
         // Фраза уже напечатана в stdout; в журнал — только факт.
-        Notice::RecoveryPhrase { .. } => tracing::info!("создана фраза восстановления"),
+        Notice::RecoveryPhrase { .. } => tracing::info!("recovery phrase created"),
         Notice::Synced { pulled, pushed } => {
-            tracing::info!("синк: пришло {}, отправлено {}", pulled.len(), pushed.len())
+            tracing::info!("sync: {} pulled, {} pushed", pulled.len(), pushed.len())
         }
-        Notice::ReadOnly { pending } => tracing::warn!(
-            "устройство только для чтения: локальные правки ({pending}) на сервер не отправляются"
-        ),
+        Notice::ReadOnly { pending } => {
+            tracing::warn!("read-only device: {pending} local edits will not be uploaded")
+        }
         Notice::Conflict { path, copy, .. } => {
-            tracing::warn!("конфликт: {path} — локальная версия сохранена как {copy}")
+            tracing::warn!("conflict: {path}; local version saved as {copy}")
         }
         Notice::LocalCopySaved { path, copy } => {
-            tracing::warn!("{path} отличался от серверного: локальная версия сохранена как {copy}")
+            tracing::warn!("{path} differed from the server; local version saved as {copy}")
         }
         Notice::Error { message, .. } => tracing::error!("{message}"),
         Notice::UnsupportedName { path } => {
-            tracing::warn!("{path}: имя недопустимо на этой системе — сюда не синхронизируется")
+            tracing::warn!("{path}: filename is invalid on this system; skipped on this device")
         }
         Notice::NonPortableName { path } => {
-            tracing::warn!("{path}: имя недопустимо на Windows и Android — туда файл не попадёт")
+            tracing::warn!(
+                "{path}: filename is invalid on Windows and Android; those devices cannot receive it"
+            )
         }
         Notice::QuotaFull { held } => tracing::warn!(
-            "место vault'а на сервере закончилось: файлов ждут отправки — {held}; освободите \
-             место (selfsync-cli purge, purge-history) или попросите админа поднять квоту"
+            "vault storage is full; {held} files await upload; free space with selfsync-cli purge or purge-history, or ask the administrator to raise the quota"
         ),
         Notice::QuotaSoft { used, soft } => tracing::warn!(
-            "на сервере занято {used} байт — больше порога предупреждения ({soft} байт)"
+            "server uses {used} bytes, exceeding the warning threshold of {soft} bytes"
         ),
         Notice::StorageDamaged {
             damaged,
@@ -301,24 +300,20 @@ fn notify_user(n: &Notice) {
         } => {
             if *damaged > 0 {
                 tracing::warn!(
-                    "на сервере повреждено файлов: {damaged}; устройства с целыми копиями \
-                     восстановят их при синке"
+                    "{damaged} files are damaged on the server; devices with intact copies will repair them during sync"
                 );
             }
             if *server_problem {
                 tracing::error!(
-                    "проверка нашла на сервере повреждение, которое исправит только админ \
-                     (база vault'а или запись ключа): selfsync verify"
+                    "verification found damage requiring an administrator (vault database or key record); run selfsync verify"
                 );
             }
         }
         Notice::MigrationProgress { done, total } => {
-            tracing::info!("шифрование vault'а: {done}/{total}")
+            tracing::info!("encrypting vault: {done}/{total}")
         }
         Notice::MassDelete { count, total } => tracing::error!(
-            "в папке не найдено {count} из {total} файлов: синк остановлен, удаления на сервер \
-             не отправлены. Если файлы пропали из-за сбоя (права, не подключён диск) — верните \
-             их; если удалены намеренно — selfsync-cli run --allow-deletes"
+            "{count} of {total} files are missing; sync stopped without sending deletions. Restore access after a disk or permission failure; for intentional deletion use selfsync-cli run --allow-deletes."
         ),
         // Победитель выбран по mtime, то есть по часам устройств.
         Notice::SettingsOverwritten {
@@ -327,22 +322,19 @@ fn notify_user(n: &Notice) {
         } => {
             if !kept_local.is_empty() {
                 tracing::warn!(
-                    "настройки изменены и здесь, и на другом устройстве — оставлена своя \
-                     (более поздняя) версия, другая в истории версий на сервере: {}",
+                    "settings changed here and on another device; kept the newer local version; the other version is in server history: {}",
                     kept_local.join(", ")
                 );
             }
             if !kept_remote.is_empty() {
                 tracing::warn!(
-                    "настройки изменены и здесь, и на другом устройстве — оставлена версия с \
-                     сервера (более поздняя), своя в корзине: {}",
+                    "settings changed here and on another device; kept the newer server version; local version is in trash: {}",
                     kept_remote.join(", ")
                 );
             }
         }
         Notice::LinksSkipped { paths } => tracing::warn!(
-            "символические ссылки не синхронизируются (под ними ничего не скачивается и не \
-             удаляется, их содержимое не уходит на сервер): {}",
+            "symbolic links are not synced; their contents are neither downloaded, deleted nor uploaded: {}",
             paths.join(", ")
         ),
         other => tracing::info!("{other:?}"),
@@ -519,7 +511,7 @@ async fn run_loop(
         let password = opts
             .password
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("для шифрования нужен пароль"))?;
+            .ok_or_else(|| anyhow::anyhow!("encryption requires a password"))?;
         lp.feed(Event::EnableEncryption {
             password,
             remember: opts.remember_key,
@@ -589,7 +581,7 @@ async fn run_loop(
                             };
                             let failed = matches!(result, Some(UiResult::Error { .. }) | None);
                             if changes && !failed {
-                                tracing::info!("синхронизация…");
+                                tracing::info!("syncing...");
                                 lp.feed(Event::SyncNow);
                                 stage = Some(Stage::Syncing);
                                 continue 'check;
@@ -599,8 +591,7 @@ async fn run_loop(
                     }
                     if s.read_only && s.pending > 0 {
                         eprintln!(
-                            "предупреждение: устройство только для чтения — локальных правок, \
-                         которые не уйдут на сервер: {}",
+                            "warning: read-only device; {} local edits will not be uploaded",
                             s.pending
                         );
                     }
@@ -691,7 +682,7 @@ impl Session {
         while !self.lp.settled() {
             match tokio::time::timeout(Duration::from_secs(120), self.rx.recv()).await {
                 Ok(Some(ev)) => self.lp.feed(ev),
-                _ => anyhow::bail!("сервер не ответил"),
+                _ => anyhow::bail!("server did not respond"),
             }
         }
         Ok(())
@@ -707,7 +698,7 @@ impl Session {
             }
             match tokio::time::timeout(Duration::from_secs(120), self.rx.recv()).await {
                 Ok(Some(ev)) => self.lp.feed(ev),
-                _ => anyhow::bail!("сервер не ответил"),
+                _ => anyhow::bail!("server did not respond"),
             }
         }
     }

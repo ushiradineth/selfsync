@@ -15,13 +15,13 @@ use selfsync_server::{AppState, Config, Mode, cmd, init_logging};
 #[command(
     name = "selfsync",
     version,
-    about = "Self-hosted сервер синхронизации заметок"
+    about = "Self-hosted note synchronization server"
 )]
 struct Cli {
-    /// Каталог данных (по умолчанию SELFSYNC_DATA_DIR, $STATE_DIRECTORY или /var/lib/selfsync).
+    /// Data directory (SELFSYNC_DATA_DIR, $STATE_DIRECTORY or /var/lib/selfsync).
     #[arg(long, global = true)]
     data: Option<PathBuf>,
-    /// TOML-конфиг (переменные окружения приоритетнее).
+    /// TOML configuration file (environment variables take precedence).
     #[arg(long, global = true)]
     config: Option<PathBuf>,
     #[command(subcommand)]
@@ -30,112 +30,105 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Обычный процесс (Docker, разработка).
+    /// Run a persistent server process (Docker or development).
     Serve {
-        /// `127.0.0.1:8085` или `unix:/path/to.sock`.
+        /// Listen address: 127.0.0.1:8085 or unix:/path/to.sock.
         #[arg(long, default_value = "127.0.0.1:8085")]
         listen: String,
-        /// Выход после простоя (`0` — выключено), например `10m`.
+        /// Exit after this idle duration, e.g. 10m (0 disables).
         #[arg(long)]
         idle_timeout: Option<String>,
     },
-    /// systemd socket activation с выходом по простою.
+    /// Run with systemd socket activation and idle shutdown.
     Socket {
         #[arg(long)]
         idle_timeout: Option<String>,
     },
-    /// Один CGI-запрос (включается и автоматически по GATEWAY_INTERFACE).
+    /// Handle one CGI request (also detected via GATEWAY_INTERFACE).
     Cgi,
-    /// Привести схемы БД к текущей версии.
+    /// Upgrade database schemas to the current version.
     Migrate {
         #[arg(long)]
         vault: Option<String>,
     },
-    /// Vault'ы.
+    /// Manage vaults.
     #[command(subcommand)]
     Vault(VaultCmd),
-    /// Токены устройств.
+    /// Manage device tokens.
     #[command(subcommand)]
     Token(TokenCmd),
-    /// Одноразовая ссылка подключения первого устройства (и QR в терминале).
+    /// Create a one-time connection link and terminal QR code.
     Link {
         #[arg(long)]
         vault: String,
-        /// Внешний адрес сервера (иначе SELFSYNC_PUBLIC_URL).
+        /// External server URL (otherwise SELFSYNC_PUBLIC_URL).
         #[arg(long)]
         url: Option<String>,
         #[arg(long)]
         name: String,
-        /// Устройство только для чтения: получает изменения, своих не отправляет.
+        /// Read-only device: receives changes without uploading local edits.
         #[arg(long)]
         read_only: bool,
     },
-    /// Загрузить существующую папку (открытым текстом).
+    /// Import an existing folder as plaintext.
     Import {
         #[arg(long)]
         vault: String,
         #[arg(long)]
         from: PathBuf,
     },
-    /// Сборка мусора. По умолчанию только показывает план.
+    /// Garbage collection; displays a plan by default.
     Gc {
         #[arg(long)]
         vault: Option<String>,
-        /// Только показать план (поведение по умолчанию).
+        /// Only display a plan (default).
         #[arg(long)]
         dry_run: bool,
-        /// Выполнить удаление.
+        /// Confirm deletion.
         #[arg(long, conflicts_with = "dry_run")]
         yes: bool,
-        /// Сколько последних ревизий файла хранить всегда.
+        /// Always retain this many recent file revisions.
         #[arg(long, default_value_t = 20)]
         keep_revisions: u64,
-        /// Ревизии моложе стольких дней не удаляются.
+        /// Never remove revisions younger than this many days.
         #[arg(long, default_value_t = 30)]
         keep_days: u64,
     },
-    /// Стереть удалённые файлы с истёкшим окном хранения (для systemd-таймера).
+    /// Purge deleted files whose retention has expired (for systemd timers).
     Sweep,
-    /// Консистентная копия данных в каталог.
-    ///
-    /// Без `--copy` блобы — жёсткие ссылки на хранилище (быстро, без места, но порча
-    /// байта на диске затронет и копию). `--rotate ROOT --keep N` — копия в
-    /// `ROOT/<время>`, лишние старые удаляются.
+    /// Create a consistent backup. Without --copy, blobs share inodes with storage, so disk corruption affects both. --rotate ROOT --keep N stores timestamped backups and removes older copies.
     Backup {
-        /// Пустой каталог для копии (или `--rotate`).
+        /// Empty destination directory (or use --rotate).
         #[arg(required_unless_present = "rotate", conflicts_with = "rotate")]
         dir: Option<PathBuf>,
-        /// Копировать блобы, не делить inode с хранилищем.
+        /// Copy blobs instead of sharing inodes with storage.
         #[arg(long)]
         copy: bool,
-        /// Каталог с копиями по времени (ротация).
+        /// Root directory for timestamped, rotating backups.
         #[arg(long, value_name = "ROOT")]
         rotate: Option<PathBuf>,
-        /// Сколько последних копий оставить при ротации.
+        /// Number of recent backups to retain during rotation.
         #[arg(long, requires = "rotate", default_value_t = 7)]
         keep: usize,
     },
-    /// Проверка целостности: базы, хэши блобов, отсутствующие блобы.
-    /// Код выхода: 0 — чисто, 1 — найдены проблемы, 2 — ошибка запуска.
+    /// Verify databases, blob hashes and missing blobs. Exit codes: 0 clean, 1 problems found, 2 startup error.
     Verify {
         #[arg(long)]
         vault: Option<String>,
-        /// Восстановить битые и отсутствующие блобы из бэкапа (`selfsync backup`).
+        /// Restore damaged or missing blobs from a selfsync backup.
         #[arg(long)]
         repair_from: Option<PathBuf>,
-        /// Печатать только проблемы (для таймера).
+        /// Only print problems (for timers).
         #[arg(long)]
         quiet: bool,
     },
-    /// Проверка установки: каталог данных и место, базы, внешний адрес и прокси,
-    /// таймеры, бэкапы на другом диске, итог verify, квоты. Код выхода: 0 — без
-    /// отказов (предупреждения допустимы), 1 — есть отказы.
+    /// Check installation: data, disk, databases, URL, proxy, timers, backups, verification and quotas. Exit 0 if there are no failures (warnings allowed), 1 on failure.
     Doctor {
-        /// Каталог бэкапов `selfsync backup --rotate`.
+        /// Backup directory used by selfsync backup --rotate.
         #[arg(long, default_value = "/var/lib/selfsync-backups")]
         backup_dir: PathBuf,
     },
-    /// Проверка живости (код 0/1), для HEALTHCHECK.
+    /// Health check for HEALTHCHECK (exit 0 or 1).
     Healthcheck {
         #[arg(
             long,
@@ -148,28 +141,26 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum VaultCmd {
-    /// Список vault'ов.
+    /// List vaults.
     List,
-    /// Квота vault'а: без флагов — показать. Значение `0` — без ограничения,
-    /// `default` — как в конфигурации сервера.
+    /// View or update vault quotas. 0 means unlimited; default uses server configuration.
     Quota {
         #[arg(long)]
         vault: String,
-        /// Предупреждение о месте (`5GiB`).
+        /// Storage warning threshold (e.g. 5GiB).
         #[arg(long)]
         soft: Option<String>,
-        /// Больше новых файлов не принимается.
+        /// Stop accepting new files above this threshold.
         #[arg(long)]
         hard: Option<String>,
-        /// Активных устройств.
+        /// Maximum active devices.
         #[arg(long)]
         devices: Option<String>,
-        /// Наибольший файл (не больше SELFSYNC_MAX_BLOB_SIZE).
+        /// Maximum file size (at most SELFSYNC_MAX_BLOB_SIZE).
         #[arg(long)]
         max_file: Option<String>,
     },
-    /// Новое поколение базы: после отката снимка ФС (или другой копии, сделанной не
-    /// `selfsync backup`) устройства сделают полную сверку. Без --vault — все vault'ы.
+    /// Regenerate database identity after restoring a filesystem snapshot or other non-selfsync backup. Devices reconcile fully. Without --vault, regenerate every vault.
     Regenerate {
         #[arg(long)]
         vault: Option<String>,
@@ -178,22 +169,22 @@ enum VaultCmd {
 
 #[derive(Subcommand)]
 enum TokenCmd {
-    /// Выдать токен новому устройству (vault создаётся при первом использовании).
+    /// Issue a token for a new device (vault created on first use).
     Add {
         #[arg(long)]
         vault: String,
         #[arg(long)]
         name: String,
-        /// Устройство только для чтения: получает изменения, своих не отправляет.
+        /// Read-only device: receives changes without uploading local edits.
         #[arg(long)]
         read_only: bool,
     },
-    /// Список устройств.
+    /// List devices.
     List {
         #[arg(long)]
         vault: Option<String>,
     },
-    /// Отозвать устройство (без --vault — во всех vault'ах).
+    /// Revoke a device (across all vaults unless --vault is specified).
     Revoke {
         #[arg(long)]
         name: String,
@@ -223,7 +214,7 @@ fn run() -> anyhow::Result<ExitCode> {
         Ok(c) => c,
         // У verify код 1 занят под «найдены проблемы»: ошибка запуска — 2.
         Err(e) if matches!(cli.cmd, Some(Cmd::Verify { .. })) => {
-            eprintln!("ошибка: {e:#}");
+            eprintln!("error: {e:#}");
             return Ok(ExitCode::from(2));
         }
         Err(e) => return Err(e),
@@ -293,13 +284,13 @@ fn run() -> anyhow::Result<ExitCode> {
         } => cmd::link(&config, &vault, url.as_deref(), &name, read_only)?,
         Cmd::Import { vault, from } => {
             let r = cmd::import(&config, &vault, &from, config.max_blob_size)
-                .with_context(|| format!("импорт из {}", from.display()))?;
+                .with_context(|| format!("import from {}", from.display()))?;
             println!(
-                "импортировано файлов: {}, без изменений: {}, папок: {}",
+                "imported {} files, {} unchanged, {} directories",
                 r.files, r.unchanged, r.folders
             );
             for (p, why) in &r.skipped {
-                println!("пропущено: {p} — {why}");
+                println!("skipped: {p}: {why}");
             }
         }
         Cmd::Gc {
@@ -333,7 +324,7 @@ fn run() -> anyhow::Result<ExitCode> {
                     previous: None,
                 },
             )?,
-            (None, None) => unreachable!("clap требует DIR или --rotate"),
+            (None, None) => unreachable!("clap requires DIR or --rotate"),
         },
         Cmd::Verify {
             vault,
@@ -345,7 +336,7 @@ fn run() -> anyhow::Result<ExitCode> {
                     Ok(true) => ExitCode::SUCCESS,
                     Ok(false) => ExitCode::from(1),
                     Err(e) => {
-                        eprintln!("ошибка: {e:#}");
+                        eprintln!("error: {e:#}");
                         ExitCode::from(2)
                     }
                 },
@@ -394,7 +385,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("ошибка: {e:#}");
+            eprintln!("error: {e:#}");
             ExitCode::FAILURE
         }
     }

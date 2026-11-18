@@ -76,13 +76,13 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
         if forgot > 0 {
             cx.log(
                 LogLevel::Info,
-                format!("исключения: забыто путей {forgot} (на сервере ничего не меняется)"),
+                format!("exclusions: forgot {forgot} paths (server unchanged)"),
             );
         }
         if replay {
             cx.log(
                 LogLevel::Info,
-                "исключения сузились: журнал сервера перечитывается с начала",
+                "exclusions narrowed; reading server journal from the beginning",
             );
         }
         cx.save().await?;
@@ -111,10 +111,7 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
                     }
                     // Старый сервер не сообщает режим в VaultState: узнали по отказу.
                     Err(SyncError::ReadOnly) => {
-                        cx.log(
-                            LogLevel::Info,
-                            "устройство только для чтения: отправка отключена",
-                        );
+                        cx.log(LogLevel::Info, "read-only device: uploads disabled");
                         cx.with_mut(|s| s.set_read_only(None));
                     }
                     Err(e) => return Err(e),

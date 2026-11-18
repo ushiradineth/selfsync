@@ -1,13 +1,14 @@
 # syntax=docker/dockerfile:1
 # Готовый статический бинарь из релиза server-X.Y.Z (сверяется с SHA256SUMS) в
 # distroless: без исходников и сборки на сервере. Этот же файл собирает образ
-# ghcr.io/darkildo/selfsync (.github/workflows/image.yml).
+# ghcr.io/ushiradineth/selfsync (.github/workflows/image.yml).
 #
 # Стадия fetch идёт на платформе сборки и только скачивает бинарь под TARGETARCH:
 # образ для amd64 и arm64 собирается без эмуляции (QEMU).
 FROM --platform=$BUILDPLATFORM alpine:3.22 AS fetch
 ARG VERSION
 ARG TARGETARCH
+ARG REPOSITORY=ushiradineth/selfsync
 RUN apk add --no-cache curl
 WORKDIR /dl
 RUN set -eu; \
@@ -15,7 +16,7 @@ RUN set -eu; \
     case "$TARGETARCH" in amd64) t=x86_64 ;; arm64) t=aarch64 ;; \
       *) echo "архитектура $TARGETARCH не поддерживается"; exit 1 ;; esac; \
     f="selfsync-$t-unknown-linux-musl"; \
-    base="https://github.com/Darkildo/selfsync/releases/download/server-$VERSION"; \
+    base="https://github.com/$REPOSITORY/releases/download/server-$VERSION"; \
     curl -fsSL -o "$f" "$base/$f"; \
     curl -fsSL -o SHA256SUMS "$base/SHA256SUMS"; \
     grep "  $f\$" SHA256SUMS | sha256sum -c -; \
@@ -25,7 +26,7 @@ RUN set -eu; \
 FROM gcr.io/distroless/static-debian12:nonroot
 ARG VERSION
 # source связывает пакет в GHCR с репозиторием.
-LABEL org.opencontainers.image.source="https://github.com/Darkildo/selfsync" \
+LABEL org.opencontainers.image.source="https://github.com/ushiradineth/selfsync" \
       org.opencontainers.image.title="selfsync" \
       org.opencontainers.image.description="Self-hosted sync server for Obsidian" \
       org.opencontainers.image.version="$VERSION" \

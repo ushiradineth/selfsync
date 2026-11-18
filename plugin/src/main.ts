@@ -1,7 +1,7 @@
 // Плагин Obsidian: тонкий слой между vault'ом и ядром. Ядро решает, что и когда
 // синхронизировать; здесь — события vault'а, исполнитель, статус-бар и окна.
 
-import { FileSystemAdapter, getLanguage, type Menu, Notice, Platform, Plugin, requestUrl, setIcon, type TAbstractFile, TFile, TFolder } from "obsidian";
+import { FileSystemAdapter, type Menu, Notice, Platform, Plugin, requestUrl, setIcon, type TAbstractFile, TFile, TFolder } from "obsidian";
 
 import wasmBytes from "selfsync-wasm-bytes";
 import { initWasm, Runner } from "./engine.ts";
@@ -60,7 +60,7 @@ export default class SelfsyncPlugin extends Plugin {
   private migrationNotice: Notice | undefined;
 
   override async onload(): Promise<void> {
-    setLanguage(getLanguage());
+    setLanguage("en");
     this.log = new SyncLog(this.logStore());
     void this.log.load();
     await this.loadSettings();
@@ -297,13 +297,13 @@ export default class SelfsyncPlugin extends Plugin {
     this.cancelRestart();
     if (this.crashes >= MAX_CRASHES) {
       this.startError = true;
-      this.addLog("error", `ядро упало ${this.crashes} раза подряд — синк остановлен`);
+      this.addLog("error", `sync core crashed ${this.crashes} times consecutively; sync stopped`);
       new Notice(t("notice.engineStopped", { n: this.crashes, cmd: t("cmd.syncNow") }), 0);
       this.renderStatus();
       return;
     }
     const delay = Math.min(5 * 60_000, this.restartBaseMs * 2 ** (this.crashes - 1));
-    this.addLog("warn", `перезапуск ядра через ${Math.round(delay / 1000)} с`);
+    this.addLog("warn", `restarting sync core in ${Math.round(delay / 1000)} s`);
     this.restarting = true;
     this.restartTimer = window.setTimeout(() => {
       this.restartTimer = undefined;
@@ -331,7 +331,7 @@ export default class SelfsyncPlugin extends Plugin {
     } catch (e) {
       if (gen !== this.generation) return;
       const message = e instanceof Error ? e.message : String(e);
-      this.addLog("error", `индекс не прочитан: ${message}`);
+      this.addLog("error", `cannot read index: ${message}`);
       new Notice(t("notice.error", { message }), 0);
       this.startError = true;
       this.renderStatus();
@@ -645,4 +645,3 @@ function toBase64(b: Uint8Array): string {
 function fromBase64(s: string): Uint8Array {
   return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 }
-

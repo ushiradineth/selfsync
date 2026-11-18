@@ -98,7 +98,7 @@ pub(crate) async fn offer_wanted(cx: &Ctx) -> SyncResult<()> {
         if ok {
             cx.log(
                 LogLevel::Info,
-                format!("сервер просил блоб {key}: залит заново"),
+                format!("server requested blob {key}; uploaded again"),
             );
             sent.insert(h);
         }

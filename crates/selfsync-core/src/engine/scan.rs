@@ -33,7 +33,7 @@ async fn canonical(cx: &Ctx, raw: &str, is_dir: bool) -> SyncResult<Option<Strin
     let Ok(vp) = VaultPath::normalize(raw) else {
         let already = cx.with_mut(|s| !s.notified.insert(raw.to_owned()));
         if !already {
-            cx.log(LogLevel::Warn, format!("имя не синхронизируется: {raw}"));
+            cx.log(LogLevel::Warn, format!("filename cannot be synced: {raw}"));
             cx.notify(Notice::Rejected {
                 path: raw.to_owned(),
                 code: VaultPath::normalize(raw)
@@ -60,7 +60,7 @@ async fn canonical(cx: &Ctx, raw: &str, is_dir: bool) -> SyncResult<Option<Strin
             target = super::resolve::unique_copy(cx, &nfc, &label).await?;
             cx.log(
                 LogLevel::Warn,
-                format!("есть и NFD, и NFC вариант имени: NFD-файл сохранён как {target}"),
+                format!("both NFD and NFC filenames exist; NFD file saved as {target}"),
             );
         }
         let _ = is_dir;
@@ -89,7 +89,7 @@ async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
         if cx.stat(&target).await?.is_none() {
             cx.log(
                 LogLevel::Warn,
-                format!("доведена прерванная запись: {target}"),
+                format!("completed interrupted write: {target}"),
             );
             return Ok(cx.rename(raw, &target).await?.map(|_| target));
         }
@@ -115,7 +115,7 @@ async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
     };
     cx.log(
         LogLevel::Warn,
-        format!("доведено прерванное переименование: {raw} → {dest}"),
+        format!("completed interrupted rename: {raw} -> {dest}"),
     );
     Ok(cx.rename(raw, &dest).await?.map(|_| dest))
 }
@@ -147,7 +147,7 @@ async fn recover_aside(cx: &Ctx, raw: &str, stem: &str) -> SyncResult<Option<Str
     if known || same_as_target {
         cx.log(
             LogLevel::Info,
-            format!("убрана лишняя вытесненная версия: {raw}"),
+            format!("removed redundant displaced version: {raw}"),
         );
         cx.delete(raw, super::types::Expect::Any).await?;
         return Ok(None);
@@ -156,7 +156,7 @@ async fn recover_aside(cx: &Ctx, raw: &str, stem: &str) -> SyncResult<Option<Str
         .await?;
     cx.log(
         LogLevel::Warn,
-        format!("вытесненная версия {target} сохранена как {copy}"),
+        format!("displaced version of {target} saved as {copy}"),
     );
     if cx.rename(raw, &copy).await?.is_none() {
         return Ok(None);
@@ -168,7 +168,7 @@ async fn recover_aside(cx: &Ctx, raw: &str, stem: &str) -> SyncResult<Option<Str
 async fn trash_abandoned(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
     cx.log(
         LogLevel::Warn,
-        format!("брошенный временный файл убран в корзину: {raw}"),
+        format!("abandoned temporary file moved to trash: {raw}"),
     );
     cx.trash(raw, super::types::Expect::Any).await?;
     Ok(None)
@@ -563,16 +563,14 @@ fn hold_mass_delete(
     if allowed {
         cx.log(
             LogLevel::Info,
-            format!("удаление {files} из {total} файлов подтверждено"),
+            format!("confirmed deletion of {files} of {total} files"),
         );
         return Ok(());
     }
     cx.with_mut(|s| s.need_full_scan = true);
     cx.log(
         LogLevel::Warn,
-        format!(
-            "полный обход не нашёл {files} из {total} файлов: удаления не отправлены, синк остановлен"
-        ),
+        format!("full scan did not find {files} of {total} files; no deletions sent, sync stopped"),
     );
     cx.notify(Notice::MassDelete {
         count: u32::try_from(files).unwrap_or(u32::MAX),
@@ -617,19 +615,19 @@ fn take_links(cx: &Ctx, listing: Vec<FileMeta>) -> Vec<FileMeta> {
     if !forgot.is_empty() {
         cx.log(
             LogLevel::Info,
-            format!("пути под символическими ссылками забыты (на сервере ничего не меняется): {forgot:?}"),
+            format!("forgot paths under symbolic links (server unchanged): {forgot:?}"),
         );
     }
     if replay {
         cx.log(
             LogLevel::Info,
-            "символическая ссылка исчезла: журнал перечитывается с начала".to_owned(),
+            "symbolic link disappeared; reading journal from the beginning".to_owned(),
         );
     }
     if !fresh.is_empty() {
         cx.log(
             LogLevel::Warn,
-            format!("символические ссылки не синхронизируются: {fresh:?}"),
+            format!("symbolic links are not synced: {fresh:?}"),
         );
         cx.notify(Notice::LinksSkipped { paths: fresh });
     }
@@ -645,7 +643,7 @@ fn skip_stuck(cx: &Ctx, raw: &str, e: SyncError) -> SyncResult<Option<String>> {
     };
     cx.log(
         LogLevel::Warn,
-        format!("файл пропущен до следующего обхода: {raw}: {msg}"),
+        format!("file skipped until next scan: {raw}: {msg}"),
     );
     let key =
         VaultPath::normalize(raw).map_or_else(|_| raw.to_owned(), |vp| vp.as_str().to_owned());
@@ -670,10 +668,7 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
         // сервер удалением (обычно его уже забыл Configure).
         let forgot = cx.with_mut(|s| s.forget_excluded());
         if !forgot.is_empty() {
-            cx.log(
-                LogLevel::Info,
-                format!("забыты исключённые пути: {forgot:?}"),
-            );
+            cx.log(LogLevel::Info, format!("forgot excluded paths: {forgot:?}"));
         }
         let listing = take_links(cx, cx.list().await?);
         let verify = cx.with_mut(|s| {
@@ -685,7 +680,7 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
         if verify {
             cx.log(
                 LogLevel::Info,
-                "проверка содержимого: все файлы хэшируются заново".to_owned(),
+                "content verification: hashing every file again".to_owned(),
             );
         }
         let mut present: BTreeMap<String, FileMeta> = BTreeMap::new();
@@ -700,7 +695,7 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
                 stuck.extend(skip_stuck(
                     cx,
                     &raw,
-                    SyncError::Io("метаданные файла недоступны".into()),
+                    SyncError::Io("file metadata unavailable".into()),
                 )?);
                 continue;
             }

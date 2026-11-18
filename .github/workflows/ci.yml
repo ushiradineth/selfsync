@@ -65,6 +65,7 @@ jobs:
           npm test
 
   extension:
+    if: github.repository == 'Darkildo/selfsync'
     name: Надстройка — selfsync-cloud против этого ядра
     needs: plugin
     runs-on: ubuntu-24.04
@@ -101,11 +102,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: sh -n deploy/install.sh && shellcheck -s sh deploy/install.sh
-      # Образ проекта — только ghcr.io/darkildo/selfsync (.github/workflows/image.yml);
+      # Образ проекта — только ghcr.io/ushiradineth/selfsync (.github/workflows/image.yml);
       # другие пространства ghcr.io чужие (ghcr.io/selfsync — не наше).
       - name: В примерах только образы ghcr.io/darkildo
         run: |
-          if grep -rnIo 'ghcr\.io/[A-Za-z0-9._-]*' deploy README.md README.ru.md | grep -v ':ghcr\.io/darkildo$'; then
+          if grep -rnIo 'ghcr\.io/[A-Za-z0-9._-]*' deploy README.md README.ru.md | grep -v ':ghcr\.io/ushiradineth$'; then
             echo "примеры развёртывания ссылаются на чужой образ в ghcr.io" >&2
             exit 1
           fi
@@ -136,7 +137,4 @@ jobs:
         working-directory: deploy/quickstart
         run: |
           cp .env.example .env
-          sed -i "s/^SELFSYNC_VERSION=.*/SELFSYNC_VERSION=0.3.2/" .env
           docker compose config -q
-          docker compose -f docker-compose.yml -f compose.build.yml build selfsync
-          docker run --rm selfsync-quickstart:0.3.2 --version

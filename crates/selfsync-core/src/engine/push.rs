@@ -225,7 +225,7 @@ fn note_hash_mismatch(cx: &Ctx, key: &str, hash: Hash, obs: &LocalObs) -> bool {
     });
     cx.log(
         LogLevel::Warn,
-        format!("{key}: сервер не сошёлся с хэшем блоба {hash} ({count}/{MISMATCH_LIMIT})"),
+        format!("{key}: server rejected blob hash {hash} ({count}/{MISMATCH_LIMIT})"),
     );
     if count < MISMATCH_LIMIT {
         return false;
@@ -279,7 +279,7 @@ fn warn_non_portable(cx: &Ctx, items: &[Item]) {
         if cx.with_mut(|s| s.notified.insert(format!("portable:{bad}"))) {
             cx.log(
                 LogLevel::Warn,
-                format!("{bad}: имя не создать на Windows и Android — туда файл не попадёт"),
+                format!("{bad}: filename is invalid on Windows and Android; those devices cannot receive it"),
             );
             cx.notify(Notice::NonPortableName { path: bad });
         }
@@ -457,7 +457,7 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
                     }
                 }
                 Err(SyncError::QuotaExceeded(m)) => {
-                    cx.log(LogLevel::Warn, format!("{key}: не отправлен — {m}"));
+                    cx.log(LogLevel::Warn, format!("{key}: not uploaded: {m}"));
                     hold_for_quota(cx, key);
                     skipped.push(key.clone());
                 }
@@ -514,7 +514,7 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
     }
     if resp.results.len() != prepared.len() {
         return Err(SyncError::Protocol(
-            "число результатов не совпадает с числом операций".into(),
+            "result count differs from operation count".into(),
         ));
     }
     for (p, r) in prepared.into_iter().zip(resp.results) {
@@ -526,7 +526,7 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
 async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()> {
     use pb::op_result::Result as R;
     let Some(r) = r.result else {
-        return Err(SyncError::Protocol("пустой результат операции".into()));
+        return Err(SyncError::Protocol("empty operation result".into()));
     };
     cx.log(
         LogLevel::Debug,
@@ -619,7 +619,7 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
             // Блоб пропал между загрузкой и операцией (gc): повторим в следующем раунде.
             cx.log(
                 LogLevel::Warn,
-                format!("блоб пропал на сервере, повтор: {item:?}"),
+                format!("blob disappeared from server; retrying: {item:?}"),
             );
         }
         (item, R::Rejected(rj)) => {
@@ -652,7 +652,7 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
             });
             cx.log(
                 LogLevel::Warn,
-                format!("сервер отклонил {key}: {} {}", rj.code, rj.message),
+                format!("server rejected {key}: {} {}", rj.code, rj.message),
             );
             cx.notify(Notice::Rejected {
                 path: key,
@@ -661,7 +661,7 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
         }
         (item, R::Conflict(c)) => {
             let Some(e) = c.server else {
-                return Err(SyncError::Protocol("Conflict без записи".into()));
+                return Err(SyncError::Protocol("Conflict has no entry".into()));
             };
             let remote = Remote::from_entry(cx, &e);
             match item {
@@ -699,7 +699,7 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
                 Item::Mkdir { key } => {
                     cx.log(
                         LogLevel::Warn,
-                        format!("на месте папки {key} на сервере файл"),
+                        format!("server file conflicts with directory {key}"),
                     );
                     cx.with_mut(|s| {
                         if let Some(f) = s.index.files.get_mut(&key) {

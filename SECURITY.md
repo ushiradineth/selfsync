@@ -1,75 +1,88 @@
-# Безопасность selfsync
+# Security
 
-## Сообщить об уязвимости
+This is the security maintenance fork at https://github.com/ushiradineth/selfsync.
+Report vulnerabilities privately through GitHub Security Advisories. Do not post
+credentials, pairing links, vault contents or recovery phrases in public issues.
 
-Через приватный security advisory на GitHub (вкладка Security → Report a vulnerability), не в публичных issues.
+## Threat model
 
-## Модель угроз
+Run the server on infrastructure you control, behind HTTPS. The server itself
+serves HTTP; expose it only to the reverse proxy. Enable SELFSYNC_TRUSTED_PROXY
+only when direct access to the server is blocked and the proxy appends a trusted
+client address. Without encryption, the server stores plaintext notes.
 
-selfsync хранит заметки на сервере, который вы контролируете. Защищаться нужно от трёх вещей:
+Every device has a random 256-bit bearer token. The server stores its SHA-256
+hash. One-time connection codes contain 80 random bits, expire after 15 minutes
+and are stored as hashes. Failed authentication and pairing attempts are rate
+limited. Revoking a token stops future API access. Read-only devices cannot
+modify vault data or create new pairing codes.
 
-1. **Перехвата трафика.** Сервер сам TLS не терминирует, поэтому его надо ставить за обратным прокси с HTTPS (готовые конфиги — в `deploy/`). Открытый HTTP годится только для localhost.
-2. **Чужого доступа к API.** Каждое устройство получает свой токен (256 случайных бит). Сервер хранит только SHA-256 токена, поэтому утечка базы токены не раскрывает. Устройство отзывается командой `selfsync token revoke` или из настроек плагина. Код подключения нового устройства одноразовый: 80 бит, действует 15 минут, на сервере хранится только его хэш.
+## End-to-end encryption
 
-   Перебор не реален и без ограничений, но сервер всё равно считает неудачи: после 10 неверных кодов с одного адреса за 15 минут адрес блокируется на 15 минут (и для API, и для страницы `/join/…`), после 200 неверных кодов со всех адресов — одна попытка в минуту для всех; после 30 отвергнутых токенов за минуту адрес блокируется на минуту. Ответ — `429` с `Retry-After`. Пороги настраиваются (`SELFSYNC_RATE_*`, README). Адрес клиента — адрес соединения; `X-Forwarded-For` учитывается только при `SELFSYNC_TRUSTED_PROXY=1` и только крайний правый, тот, что дописал ваш прокси. Включать флаг без такого прокси нельзя: заголовок подделывается. Устройство можно подключить только для чтения (`--read-only`, переключатель в плагине): сервер пропускает с его токеном только `GET` и `HEAD`. Утечка такого токена даёт чтение всего vault'а — открытого текста или, если vault зашифрован, только шифртекста и записи ключа, — но не запись, не отзыв устройств и не новые коды подключения.
+A random 256-bit master key is wrapped using a password-derived key (Argon2id,
+64 MiB, three passes by default). HKDF-SHA256 derives separate keys for content,
+nonces, filenames and content identifiers. File contents use AES-256-GCM-SIV in
+1 MiB chunks; filenames use AES-SIV. Chunk authentication covers the blob header,
+content identifier, chunk index and final-chunk marker. A recovery phrase is
+24 BIP-39 words generated from 256 random bits and must be stored privately.
 
-   Глобальный порог для кодов означает, что злоумышленник может на время закрыть подключение новых устройств для всех; уже подключённые устройства это не затрагивает.
-3. **Доступа к файлам сервера** — у хостера, при утечке бэкапа или взломе. Без шифрования такой человек видит всё. Защищает от этого только сквозное шифрование, описанное ниже.
+The server still sees file counts, directory depth, approximate filename lengths,
+file sizes, modification and sync times, device names, history counts and equality
+of contents. Encryption is deterministic to support deduplication and retries.
 
-Журналы сервера не содержат имён файлов (имена передаются в теле запроса), токенов и паролей.
+**This protocol does not authenticate file placement or freshness against a
+malicious server.** A compromised server can replay an old valid revision, swap
+valid ciphertext between files, hide entries or delete them. Encryption prevents
+creating arbitrary new authenticated ciphertext, but does not detect those
+whole-record attacks. Independent versioned backups remain necessary. This fork
+preserves the upstream protocol and existing vault format; the fixes in 0.10.2 do
+not claim to solve this limitation. Solving it requires an authenticated metadata
+protocol and a coordinated migration of every client.
 
-## Сквозное шифрование
+Changing the password only rewraps the same master key. Someone who retained an
+old key record and its password or recovery phrase retains that master key. After
+revoking a compromised device or exposing a password or phrase, rotate the master
+key (rekey), not just the password. Rotation cannot revoke files already copied
+or older backups encrypted with the old key. Completed rotation removes old-key
+server history and trash. Keep and verify an independent backup first.
 
-Включается на существующем vault'е, после чего на сервере остаётся только шифртекст.
+## Local files and keys
 
-**Устройство ключей.**
-- Случайный 256-битный мастер-ключ обёрнут ключом, выведенным из пароля: Argon2id, 64 МиБ, 3 прохода.
-- Из мастер-ключа через HKDF выводятся отдельные ключи для содержимого, nonce, имён и идентификаторов содержимого.
-- Смена пароля переписывает только обёртку: данные перешифровывать не нужно.
-- По желанию — вторая обёртка того же мастер-ключа, **фразой восстановления**: 24 слова BIP-39, 256 случайных бит. Ключ обёртки — HKDF-SHA256 от этих бит; Argon2 не нужен, подбирать нечего. Обёртка восстановления целиком входит в AAD парольной обёртки (запись формата 2), поэтому вырезать или подменить её незаметно для пароля нельзя.
+Vault files and the merge-base cache are plaintext on devices. If remember-key is
+enabled, the plugin stores the master key in Obsidian local storage, and the CLI
+stores it in .selfsync/key with mode 0600. The plugin's device token is in
+.obsidian/plugins/selfsync/data.json; the CLI token is in .selfsync/config.toml.
+Selfsync excludes its own storage from sync. Other backup or sync tools may still
+copy those credentials. Local device compromise is outside the encryption boundary.
 
-**Что зашифровано.**
-- Содержимое файлов: AES-256-GCM-SIV чанками по 1 МиБ. В AAD каждого чанка входят заголовок блоба, идентификатор содержимого, номер чанка и признак последнего чанка. Поэтому чанк нельзя незаметно изменить, переставить, отрезать или подставить из другого файла.
-- Имена файлов и папок: каждый сегмент пути — AES-SIV с паддингом до 16 байт.
+Desktop and CLI temporary replacement writes reject existing symbolic and hard
+links and create new files exclusively, with private permissions. Desktop parent
+directories are rechecked on each operation. This protects against planted link
+entries; it is not an operating-system sandbox against a malicious process
+concurrently replacing directory trees. Do not share write access to vault or
+state directories with untrusted local users or processes. On mobile, filesystem
+access is mediated by Obsidian's adapter, which may follow platform links.
 
-**Что сервер видит и при шифровании:**
-- число файлов и папок, глубину вложенности и длину имён с точностью до 16 байт;
-- размеры файлов: шифртекст почти равен открытому тексту, а небольшие текстовые файлы сжимаются перед шифрованием, так что виден сжатый размер;
-- время изменения файлов (mtime передаётся открыто) и время каждой синхронизации;
-- какое устройство что изменило, имена устройств, число ревизий у каждого файла;
-- **равенство содержимого.** Шифрование детерминированное: одинаковые файлы и одинаковые версии дают одинаковый шифртекст. Сервер видит, что две заметки совпадают или что файл вернули к прежней версии, хотя и не знает, что в них. Это цена дедупликации, идемпотентных повторов и безопасной миграции (см. [spec/decisions.md](spec/decisions.md)).
+## Operations and releases
 
-**От чего шифрование не защищает:**
-- **От злонамеренного сервера, который подменяет данные целиком.** Сервер не может создать новый шифртекст, но может отдать старую ревизию файла как текущую, поменять местами содержимое двух файлов (содержимое не привязано к пути), скрыть файл или удалить его. Клиент такие подмены не распознаёт.
-- **От слабого пароля.** Имея файлы сервера, пароль можно подбирать офлайн; Argon2id делает каждую попытку дорогой, но не бесконечно. Плагин показывает оценку стойкости — это совет, а не запрет.
-- **От взлома устройства.** Если при вводе пароля выбрано «запомнить на этом устройстве», мастер-ключ хранится в локальном хранилище Obsidian на этом устройстве (не в папке vault'а). Консольный клиент хранит его в `.selfsync/key` с правами 0600. Кто получил доступ к устройству, тот получил ключ.
-- **От утечки старого пароля.** Смена пароля не меняет мастер-ключ. Если кто-то когда-то получил старую запись ключа с сервера и знает старый пароль, у него остаётся мастер-ключ. Мастер-ключ меняет **смена ключа** (ниже).
+Use an unprivileged server process, a private data directory and a hardened
+container or systemd unit. Regularly run selfsync verify and take consistent
+backups with selfsync backup --copy. Test restores; same-disk backups do not
+survive disk failure. History and trash are not substitutes for independent backups.
 
-**Смена ключа.** Новый мастер-ключ под тем же паролем; vault перешифровывается целиком, после чего сервер стирает все записи и блобы прежнего ключа вместе с историей и корзиной. Нужна после отзыва устройства или утечки пароля либо фразы: отозванное устройство знает мастер-ключ, и если ему когда-нибудь попадут файлы с сервера (бэкап, взлом), оно их прочитает. После смены ключа:
-- новое, что появится в vault'е, прежний ключ не открывает — ни на сервере, ни в бэкапах, сделанных после смены;
-- на сервере не остаётся ни одного шифртекста прежнего ключа;
-- но то, что устройство уже скачало или скопировало раньше, у него остаётся — смена ключа это не отменяет;
-- бэкапы сервера, сделанные до смены, открываются прежним ключом.
+Fork releases are built in GitHub Actions with locked dependencies. Server and
+CLI binaries include SHA256SUMS; binary, plugin and GHCR releases carry GitHub
+provenance attestations. Verify with gh attestation verify against
+ushiradineth/selfsync, and pin the container digest. Checksums alone do not
+establish the identity of the publisher. No binary reproducibility verification
+is implied by the presence of provenance.
 
-Пока перешифровка идёт, запись ключа (формат 3) хранит прежний мастер-ключ под ключом из нового: если устройство, начавшее смену, пропадёт, её доведёт любое устройство с паролем. По завершении прежний ключ из записи убирается. Поколение ключа входит в AAD парольной обёртки, обёртка прежнего ключа к поколению привязана своим AAD. Каждое устройство после смены спрашивает пароль: запомненный ключ больше не подходит. Фраза восстановления, если была, заменяется новой. Запись формата 3 открывают плагин и CLI 0.3.0 и новее.
-
-**Фраза восстановления.** Создаётся при включении шифрования (в плагине — по умолчанию, в CLI — `encrypt --recovery`) или позже кнопкой в настройках (`selfsync-cli recovery create`), показывается один раз и нигде не сохраняется: ни на сервере, ни в индексе, ни в журналах, ни в хранилище Obsidian. По силе она равна паролю и важнее его: это 256 бит случайности, так что офлайн-перебор бессмыслен, но кто её узнал, тот раскрыл vault без пароля. Храните её у себя, отдельно от пароля. Смена пароля фразу не отменяет — отменяет только «Создать новую» (прежняя перестаёт работать) или «Удалить». Оговорка про утечку старого пароля распространяется и на старую фразу: кто сохранил старую запись ключа и знает старую фразу, знает и мастер-ключ. Запись с фразой — формат 2: плагин и CLI 0.1.x её не откроют.
-
-Без фразы пароль не восстанавливается. Без пароля и фразы копия на сервере не читается, но локальные файлы на устройствах остаются открытыми — с них можно начать заново.
-
-## Где лежат секреты
-
-| Что | Где | Защита |
-|---|---|---|
-| Токен устройства (плагин) | `<vault>/.obsidian/plugins/selfsync/data.json` | права ФС устройства; если папку vault'а синхронизирует что-то ещё (iCloud, git), отзовите устройство после утечки |
-| Токен (консольный клиент) | `<папка>/.selfsync/config.toml` | 0600 |
-| Мастер-ключ (по выбору) | localStorage Obsidian / `.selfsync/key` | права ФС устройства, 0600 |
-| Хэши токенов, записи ключа, данные | каталог данных сервера | 0700, юнит systemd с `DynamicUser` и песочницей |
-
-## Целостность без шифрования
-
-Сервер адресует блобы по SHA-256, а клиент проверяет хэш каждого скачанного блоба. Порча файла на диске сервера или в пути будет обнаружена, но от злонамеренного сервера без шифрования это не защищает. Чтобы порча на диске нашлась раньше, чем файл понадобится клиенту, `selfsync verify` (еженедельный таймер) пересчитывает хэши всех блобов и умеет восстанавливать их из бэкапа.
-
-## Сборки
-
-Релизные бинарники собираются воспроизводимо: время сборки и пути машины в них не попадают, тулчейн и зависимости зафиксированы, так что сборка того же тега даёт те же байты. Бинарники лежат в релизах `server-X.Y.Z` вместе с `SHA256SUMS`; у всех файлов релизов, включая плагин, есть аттестации происхождения GitHub (`gh attestation verify <файл> --repo Darkildo/selfsync`).
+The November 2026 dependency review updated affected Rust TLS, certificate, Tokio,
+SQLite and rustix versions. The npm build toolchain uses patched minimatch and fast-uri while retaining
+Obsidian lint checks. GitHub withdrew GHSA-fc5q-39xc-vjpf (picomatch) on
+2026-11-18, although npm audit still reports its development-tool dependency
+chain. Lint glob patterns are trusted repository configuration and never process
+untrusted vault input at runtime. See https://github.com/advisories/GHSA-fc5q-39xc-vjpf.
+Do not accept untrusted glob patterns in build tooling. humantime remains an
+upstream dependency with an informational unmaintained advisory; it is not a
+reported exploitable vulnerability. Recheck current advisories before upgrading.

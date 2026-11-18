@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.10.2 (ushiradineth fork)
+
+- Reject symbolic and hard links at temporary write paths instead of truncating
+  their targets. Create replacement files exclusively with private permissions.
+  Check desktop parent directories for links on every operation instead of
+  trusting a two-second cache. Add filesystem regression tests.
+- Upgrade the Rust TLS, certificate verification, Tokio, SQLite and rustix
+  dependencies affected by the November 2026 advisory scan.
+- Refresh JavaScript build dependencies. Override minimatch and fast-uri to
+  patched versions; retain Obsidian lint checks. Document the picomatch advisory
+  withdrawn by GitHub on 2026-11-18 but still returned by npm audit.
+- Use English for server/CLI help, diagnostics, metrics and shared-core messages.
+  Start the Obsidian plugin in English. Keep translation dictionaries available
+  to extensions and preserve existing encrypted vault/protocol formats.
+- Publish fork-owned binaries, plugin assets and GHCR images. Image builds check
+  out the matching release tag, with source provenance and SBOM attestations.
+- Replay, ciphertext substitution and malicious-server deletion remain outside
+  the current encryption protocol's guarantees; no authenticated-protocol
+  migration is performed by this release.
+
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
 ## 0.10.1

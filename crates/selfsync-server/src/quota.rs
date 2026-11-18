@@ -37,7 +37,7 @@ pub struct Own {
 
 /// Лимит устройств vault'а исчерпан.
 #[derive(Debug, thiserror::Error)]
-#[error("в vault'е уже {0} устройств — это его лимит; отзовите ненужное")]
+#[error("vault already has {0} devices, its configured limit; revoke an unused device")]
 pub struct DeviceLimit(pub u32);
 
 fn get(c: &Connection, key: &str) -> rusqlite::Result<Option<u64>> {
@@ -171,7 +171,7 @@ pub async fn check_new_blob(st: &AppState, v: &Arc<Vault>, h: Hash, size: u64) -
     }
     let max_file = max_file(&l, &st.config);
     if size > max_file {
-        return Err(ApiError::too_large("файл больше лимита vault'а"));
+        return Err(ApiError::too_large("file exceeds the vault size limit"));
     }
     let mut room = u64::MAX;
     if l.hard > 0 {
@@ -185,7 +185,7 @@ pub async fn check_new_blob(st: &AppState, v: &Arc<Vault>, h: Hash, size: u64) -
         let st = st.clone();
         let total = tokio::task::spawn_blocking(move || server_usage(&st)).await??;
         if total.saturating_add(size) > server_hard || total >= server_hard {
-            return Err(exceeded("место на сервере закончилось"));
+            return Err(exceeded("server storage is full"));
         }
         room = room.min(server_hard - total);
     }
@@ -196,7 +196,7 @@ pub async fn check_new_blob(st: &AppState, v: &Arc<Vault>, h: Hash, size: u64) -
 }
 
 pub fn vault_full() -> ApiError {
-    exceeded("место vault'а закончилось")
+    exceeded("vault storage is full")
 }
 
 /// Лимит устройств vault'а (для `add_device`).

@@ -193,13 +193,13 @@ pub fn add_device(
 ) -> anyhow::Result<(u32, String)> {
     anyhow::ensure!(
         valid_vault_name(vault),
-        "имя vault'а должно быть [a-z0-9-]{{1,64}}"
+        "vault name must match [a-z0-9-]{{1,64}}"
     );
     check_device_limit(c, vault, max_devices)?;
     let name = name.trim();
     anyhow::ensure!(
         !name.is_empty() && name.len() <= 128,
-        "имя устройства: 1–128 байт"
+        "device name must contain 1-128 bytes"
     );
     let token = generate_token()?;
     c.execute(
@@ -351,7 +351,7 @@ pub fn create_join_code(
     created_by: Option<u32>,
     read_only: bool,
 ) -> anyhow::Result<(String, i64)> {
-    anyhow::ensure!(valid_vault_name(vault), "неверное имя vault'а");
+    anyhow::ensure!(valid_vault_name(vault), "invalid vault name");
     let code = generate_join_code()?;
     let now = now_ms();
     let expires = now + JOIN_TTL_MS;

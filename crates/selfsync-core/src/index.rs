@@ -463,11 +463,11 @@ impl From<IndexV1> for Index {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum IndexError {
-    #[error("не снимок индекса selfsync")]
+    #[error("not a selfsync index snapshot")]
     BadMagic,
-    #[error("снимок индекса из более новой версии ({0})")]
+    #[error("index snapshot is from a newer version ({0})")]
     TooNew(u32),
-    #[error("снимок индекса повреждён")]
+    #[error("index snapshot is damaged")]
     Corrupt,
 }
 

@@ -870,7 +870,7 @@ async fn lock_prevents_parallel_run() {
     .unwrap_err();
     let msg = format!("{err:#}");
     assert!(
-        msg.contains("другим процессом") && msg.contains("systemctl --user stop"),
+        msg.contains("another process") && msg.contains("systemctl --user stop"),
         "{msg}"
     );
     assert!(runner::run(a.path(), &ca, once(None)).await.is_err());
@@ -1254,8 +1254,8 @@ async fn diagnose_finds_typical_problems() {
 }
 
 /// Сценарий вместо терминала: ответы на вопросы по очереди, всё сказанное — в
-/// журнал. `wait` — перед ответом дождаться сигнала (цифры показаны на другой
-/// стороне), `signal` — послать его, когда показаны цифры.
+/// журнал. `wait` — перед ответом дождаться сигнала (digits показаны на другой
+/// стороне), `signal` — послать его, когда показаны digits.
 struct Script {
     answers: Vec<bool>,
     said: Vec<String>,
@@ -1274,7 +1274,7 @@ impl Script {
     }
 
     fn note(&mut self, text: &str) {
-        if text.contains("цифры")
+        if text.contains("digits")
             && let Some(s) = &self.signal
         {
             let _ = s.send(());
@@ -1294,7 +1294,7 @@ impl selfsync_cli::handoff::Prompt for Script {
         // Сигнала ждёт только первый вопрос («передать?»).
         if let Some(w) = self.wait.take() {
             w.recv_timeout(Duration::from_secs(5))
-                .expect("цифры на новом устройстве");
+                .expect("digits на новом устройстве");
         }
         if !self.answers.is_empty() && self.answers.remove(0) {
             Answer::Yes
@@ -1322,7 +1322,7 @@ struct Handoff {
 
 /// Зашифрованный vault на папке A (ключ запомнен) и новое устройство по коду A
 /// с передачей ключа. Источник — в своём потоке (ядро не `Send`, а вопрос
-/// «передать?» ждёт, пока новое устройство покажет цифры). `qr` — у нового
+/// «передать?» ждёт, пока новое устройство покажет digits). `qr` — у нового
 /// устройства ссылка из QR (`m=`, `h=`), `give` и `agree` — ответы источника и
 /// нового устройства.
 async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: &[bool], agree: bool) -> Handoff {
@@ -1439,7 +1439,7 @@ fn digits(said: &[String]) -> String {
         .iter()
         .rev()
         .find(|s| s.chars().filter(char::is_ascii_digit).count() >= 6)
-        .expect("цифры");
+        .expect("digits");
     let d: String = s.chars().filter(char::is_ascii_digit).collect();
     d[d.len() - 6..].to_owned()
 }
@@ -1460,10 +1460,10 @@ async fn join_hands_key_by_qr() {
         h.src
             .said
             .iter()
-            .any(|s| s.contains("подключилось по QR-коду"))
+            .any(|s| s.contains("connected using a QR code"))
     );
     // Цифры новое устройство показывает и при QR.
-    assert!(h.dst.said.iter().any(|s| s.contains("цифры обмена")));
+    assert!(h.dst.said.iter().any(|s| s.contains("exchange digits")));
     assert!(h.fresh.path().join(".selfsync/key").exists());
     // Пароль не нужен: ключ уже на устройстве.
     assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::Synced);
@@ -1485,12 +1485,12 @@ async fn join_hands_key_by_typed_code_after_digits() {
         h.src.said,
         h.dst.said
     );
-    // Обе стороны показали одни и те же цифры.
+    // Обе стороны показали одни и те же digits.
     assert_eq!(digits(&h.src.said), digits(&h.dst.said));
     assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::Synced);
 }
 
-/// Кодом руками: новое устройство не подтвердило цифры — ключ не принят, даже
+/// Кодом руками: новое устройство не подтвердило digits — ключ не принят, даже
 /// если источник его отдал.
 #[tokio::test(flavor = "multi_thread")]
 async fn join_typed_code_needs_confirm_on_new_device() {
@@ -1520,13 +1520,13 @@ async fn join_declined_then_revoked() {
     let h = handoff_pair(&srv, "hr", true, &[false, true], true).await;
     assert_eq!((h.given, h.got), (Exchange::Refused, Exchange::Refused));
     assert!(
-        h.src.said.iter().any(|s| s.contains("отозвано")),
+        h.src.said.iter().any(|s| s.contains("revoked")),
         "{:?}",
         h.src.said
     );
     assert!(
-        // Обмен отменён (404) или устройство уже отозвано (401) — смотря что раньше.
-        h.dst.said.iter().any(|s| s.starts_with("ключ не пришёл")),
+        // Обмен отменён (404) или устройство уже revoked (401) — смотря что раньше.
+        h.dst.said.iter().any(|s| s.starts_with("key not received")),
         "отказ дошёл до нового устройства: {:?}",
         h.dst.said
     );

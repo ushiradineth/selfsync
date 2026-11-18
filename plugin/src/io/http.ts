@@ -35,7 +35,7 @@ export class ObsidianHttp implements HttpBackend {
     const req = this.requestUrl({ url, method, headers: rec, body: body(data), contentType: ct, throw: false });
     let timer: number | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = window.setTimeout(() => reject(new Error(`таймаут ${timeoutMs} мс`)), timeoutMs);
+      timer = window.setTimeout(() => reject(new Error(`timeout after ${timeoutMs} ms`)), timeoutMs);
     });
     try {
       const r = await Promise.race([req, timeout]);

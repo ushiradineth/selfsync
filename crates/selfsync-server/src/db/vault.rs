@@ -492,19 +492,19 @@ impl KeyState {
 #[allow(clippy::result_large_err)]
 fn check_path(p: Option<&pb::Path>, ks: &KeyState) -> Result<Vec<u8>, pb::OpResult> {
     let Some(p) = p else {
-        return Err(rejected("path_missing", "нет пути"));
+        return Err(rejected("path_missing", "missing path"));
     };
     validate_proto_path(p).map_err(|e| reject_path(&e))?;
     if !p.encrypted && ks.forbids_plaintext() {
         return Err(rejected(
             "plaintext_in_encrypted_vault",
-            "vault зашифрован: открытые записи запрещены",
+            "vault is encrypted: plaintext entries are forbidden",
         ));
     }
     if p.encrypted && !ks.accepts_epoch(selfsync_core::path::path_epoch(p)) {
         return Err(rejected(
             "stale_key_epoch",
-            "ключ шифрования сменился: перечитайте запись ключа",
+            "encryption key changed; fetch the key record again",
         ));
     }
     Ok(canonical_encode(p))
@@ -538,7 +538,7 @@ pub fn apply_ops(
     let mut results = Vec::with_capacity(ops.len());
     for op in ops {
         let r = match &op.kind {
-            None => rejected("op_empty", "пустая операция"),
+            None => rejected("op_empty", "empty operation"),
             Some(pb::op::Kind::Put(p)) => op_put(&tx, ctx, &ks, &mut seq, p)?,
             Some(pb::op::Kind::Delete(d)) => op_delete(&tx, ctx, &mut seq, d)?,
             Some(pb::op::Kind::Rename(r)) => op_rename(&tx, ctx, &ks, &mut seq, r)?,
@@ -571,10 +571,10 @@ fn op_put(
         Err(r) => return Ok(r),
     };
     let Some(hash) = Hash::from_slice(&p.hash) else {
-        return Ok(rejected("bad_hash", "хэш должен быть 32 байта"));
+        return Ok(rejected("bad_hash", "hash must be 32 bytes"));
     };
     if p.size > ctx.max_blob_size {
-        return Ok(rejected("too_large", "файл больше лимита сервера"));
+        return Ok(rejected("too_large", "file exceeds the server size limit"));
     }
     let row = get_file(tx, &key)?;
     // 2. Идемпотентность раньше base_rev.
@@ -687,13 +687,13 @@ fn op_rename(
     if from[0] != to[0] {
         return Ok(rejected(
             "rename_mode_mismatch",
-            "переименование между открытым и зашифрованным путём",
+            "cannot rename between plaintext and encrypted paths",
         ));
     }
     if from == to {
         return Ok(rejected(
             "rename_same_path",
-            "источник совпадает с назначением",
+            "source and destination are identical",
         ));
     }
     let src = get_file(tx, &from)?;

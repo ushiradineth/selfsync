@@ -279,7 +279,7 @@ async fn device_limit() {
     // Админ упирается в тот же лимит.
     let config = s.config().clone();
     let e = selfsync_server::cmd::token_add(&config, "notes", "d", false).unwrap_err();
-    assert!(e.to_string().contains("лимит"), "{e}");
+    assert!(e.to_string().contains("limit"), "{e}");
 }
 
 async fn purge_history(s: &TestServer, t: &str, path: &str, before_rev: u64) -> Resp {

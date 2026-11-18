@@ -280,7 +280,7 @@ fn token_cli_roundtrip() {
         .unwrap();
     let l = String::from_utf8(list.stdout).unwrap();
     assert!(l.contains("laptop"));
-    assert!(l.contains("клиент неизвестен"), "{l}");
+    assert!(l.contains("unknown client"), "{l}");
     assert!(!l.contains(token), "токен не показывается повторно");
     let rv = Command::new(bin)
         .args(["token", "revoke", "--name", "laptop", "--data"])
@@ -293,7 +293,7 @@ fn token_cli_roundtrip() {
         .arg(data.path())
         .output()
         .unwrap();
-    assert!(String::from_utf8(list.stdout).unwrap().contains("ОТОЗВАН"));
+    assert!(String::from_utf8(list.stdout).unwrap().contains("REVOKED"));
     let vl = Command::new(bin)
         .args(["vault", "list", "--data"])
         .arg(data.path())
@@ -434,8 +434,8 @@ async fn verify_clean_store_is_ok() {
     assert_eq!((r.orphans, r.uploads), (0, 0));
     let (code, out) = run_verify(&s.config().data_dir, &[]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("server.db: в порядке"), "{out}");
-    assert!(out.contains("vault notes: блобов 2"), "{out}");
+    assert!(out.contains("server.db: OK"), "{out}");
+    assert!(out.contains("vault notes: 2 blobs"), "{out}");
     // --quiet на чистом хранилище молчит
     let (code, out) = run_verify(&s.config().data_dir, &["--quiet"]);
     assert_eq!((code, out.as_str()), (0, ""));
@@ -458,8 +458,11 @@ async fn verify_detects_corrupt_blob() {
     // повторная проверка видит его отсутствующим, запрос остаётся
     let (code, out) = run_verify(&s.config().data_dir, &["--quiet"]);
     assert_eq!(code, 1, "{out}");
-    assert!(out.contains(&format!("нет блоба {}", h.to_hex())), "{out}");
-    assert!(out.contains("запрошено у устройств 1"), "{out}");
+    assert!(
+        out.contains(&format!("missing blob {}", h.to_hex())),
+        "{out}"
+    );
+    assert!(out.contains("requested 1 blobs from devices"), "{out}");
     assert!(
         !out.contains("server.db"),
         "--quiet печатает только проблемы: {out}"
@@ -523,7 +526,7 @@ async fn verify_detects_missing_blob() {
     let (code, out) = run_verify(&s.config().data_dir, &[]);
     assert_eq!(code, 1, "{out}");
     assert!(
-        out.contains(&format!("нет блоба {} (dir/b.md)", h.to_hex())),
+        out.contains(&format!("missing blob {} (dir/b.md)", h.to_hex())),
         "{out}"
     );
     assert!(out.contains("--repair-from"), "подсказка про бэкап: {out}");
@@ -548,7 +551,7 @@ async fn verify_repairs_from_backup() {
     );
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains(&format!("восстановлен из бэкапа {}", a.to_hex())),
+        out.contains(&format!("restored from backup {}", a.to_hex())),
         "{out}"
     );
     // битый оригинал — в карантине, на месте — проверенная копия
@@ -604,7 +607,7 @@ async fn verify_rejects_bad_backup_blob() {
     };
     let r = verify::verify_vault(s.config(), "notes", opts).unwrap();
     assert_eq!(r.corrupt, vec![a]);
-    assert_eq!(r.unrepaired, vec![(a, "в бэкапе тоже повреждён")]);
+    assert_eq!(r.unrepaired, vec![(a, "backup copy is also damaged")]);
     assert!(r.repaired.is_empty());
     // оригинал — в карантине, блоб запрошен у устройств
     assert!(!v.blobs.exists(&a));
@@ -618,7 +621,7 @@ async fn verify_rejects_bad_backup_blob() {
         &["--quiet", "--repair-from", bk.to_str().unwrap()],
     );
     assert_eq!(code, 1, "{out}");
-    assert!(out.contains("не восстановлен"), "{out}");
+    assert!(out.contains("could not be restored"), "{out}");
 }
 
 #[tokio::test]
@@ -631,7 +634,7 @@ async fn verify_checks_vault_key_record() {
         selfsync_server::db::vault::set_meta_blob(&c, "vault_key", b"not a record").unwrap();
     }
     let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
-    assert!(r.key_problem.as_deref().unwrap().contains("не разбирается"));
+    assert!(r.key_problem.as_deref().unwrap().contains("cannot decode"));
     {
         let c = v.pool.get().unwrap();
         c.execute("DELETE FROM meta WHERE key = 'vault_key'", [])
@@ -648,7 +651,7 @@ async fn verify_checks_vault_key_record() {
         r.key_problem
             .as_deref()
             .unwrap()
-            .contains("нет записи ключа")
+            .contains("without an encryption key record")
     );
 }
 
@@ -735,7 +738,7 @@ fn verify_start_errors_exit_2() {
     let data = tempfile::tempdir().unwrap();
     let (code, out) = run_verify(data.path(), &["--vault", "nope"]);
     assert_eq!(code, 2, "{out}");
-    assert!(out.contains("не найден"), "{out}");
+    assert!(out.contains("not found"), "{out}");
     let (code, _) = run_verify(data.path(), &["--repair-from", "/nonexistent/backup"]);
     assert_eq!(code, 2);
 }
@@ -844,20 +847,20 @@ async fn doctor_reports_setup_problems() {
             .collect()
     };
     let r = doctor(&config, &opts);
-    assert_eq!(find(&r, "каталог данных")[0].0, Level::Ok);
+    assert_eq!(find(&r, "data directory")[0].0, Level::Ok);
     assert_eq!(
-        find(&r, "внешний адрес")[0].0,
+        find(&r, "public URL")[0].0,
         Level::Warn,
         "PUBLIC_URL не задан"
     );
     let v = find(&r, "vault «notes»");
     assert!(
         v.iter()
-            .any(|(l, t)| *l == Level::Warn && t.contains("verify")),
+            .any(|(l, t)| *l == Level::Warn && t.contains("verification")),
         "{v:?}"
     );
     assert_eq!(
-        find(&r, "бэкапы")[0].0,
+        find(&r, "backups")[0].0,
         Level::Warn,
         "пустой каталог бэкапов"
     );
@@ -880,17 +883,17 @@ async fn doctor_reports_setup_problems() {
         .unwrap();
     }
     let r = doctor(&config, &opts);
-    assert_eq!(find(&r, "внешний адрес")[0].0, Level::Ok);
-    assert!(find(&r, "прокси").is_empty());
+    assert_eq!(find(&r, "public URL")[0].0, Level::Ok);
+    assert!(find(&r, "proxy").is_empty());
     let v = find(&r, "vault «notes»");
     assert!(
         v.iter()
-            .any(|(l, t)| *l == Level::Ok && t.contains("verify")),
+            .any(|(l, t)| *l == Level::Ok && t.contains("verification")),
         "{v:?}"
     );
     assert!(
         v.iter()
-            .any(|(l, t)| *l == Level::Fail && t.contains("место")),
+            .any(|(l, t)| *l == Level::Fail && t.contains("storage full")),
         "{v:?}"
     );
     assert!(r.failed());
@@ -899,6 +902,6 @@ async fn doctor_reports_setup_problems() {
     std::fs::set_permissions(&config.data_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     config.trusted_proxy = false;
     let r = doctor(&config, &opts);
-    assert_eq!(find(&r, "каталог данных")[0].0, Level::Warn);
-    assert_eq!(find(&r, "прокси")[0].0, Level::Warn);
+    assert_eq!(find(&r, "data directory")[0].0, Level::Warn);
+    assert_eq!(find(&r, "proxy")[0].0, Level::Warn);
 }

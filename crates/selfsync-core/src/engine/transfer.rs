@@ -269,7 +269,7 @@ pub(crate) async fn upload_big(
                 offset = api::upload_state(cx, &id).await?.offset;
                 stalls += 1;
                 if stalls > 5 {
-                    return Err(SyncError::Protocol("загрузка не продвигается".into()));
+                    return Err(SyncError::Protocol("upload is not making progress".into()));
                 }
             }
         }
@@ -301,7 +301,7 @@ pub(crate) async fn fetch_small_with(
 ) -> SyncResult<Vec<u8>> {
     let data = api::get_blob(cx, h, None).await?;
     if Hash::of(&data) != *h {
-        return Err(SyncError::Corrupt("хэш скачанного блоба не совпал".into()));
+        return Err(SyncError::Corrupt("downloaded blob hash mismatch".into()));
     }
     let header = BlobHeader::parse(&data).map_err(|e| SyncError::Corrupt(e.to_string()))?;
     if header.encrypted() && keys.is_none() {
@@ -371,7 +371,7 @@ pub(crate) async fn download_temp_with(
 ) -> SyncResult<(String, LocalObs)> {
     let obs = download_big(cx, "", h, blob_size, None, keys)
         .await?
-        .ok_or_else(|| SyncError::Io("временный файл не записан".into()))?;
+        .ok_or_else(|| SyncError::Io("temporary file was not written".into()))?;
     Ok((temp_name(h), obs))
 }
 
@@ -396,13 +396,11 @@ async fn download_big(
     .await?;
     let header = BlobHeader::parse(&head).map_err(|e| SyncError::Corrupt(e.to_string()))?;
     if header.encoded_len() != blob_size || header.compressed() {
-        return Err(SyncError::Corrupt(
-            "размер блоба не сходится с заголовком".into(),
-        ));
+        return Err(SyncError::Corrupt("blob size does not match header".into()));
     }
     let prefix_len = usize::try_from(header.data_offset()).unwrap_or(0);
     if head.len() < prefix_len {
-        return Err(SyncError::Corrupt("короткий заголовок".into()));
+        return Err(SyncError::Corrupt("truncated header".into()));
     }
     let mut dec = ChunkDecoder::new(
         &head[..prefix_len],
@@ -482,7 +480,9 @@ async fn download_big(
             .end;
         let data = api::get_blob(cx, h, Some((start, end - 1))).await?;
         if data.len() as u64 != end - start {
-            return Err(SyncError::Corrupt("Range вернул не тот размер".into()));
+            return Err(SyncError::Corrupt(
+                "Range returned an unexpected size".into(),
+            ));
         }
         let mut plain_part = Vec::with_capacity(
             usize::try_from(per_part * u64::from(header.chunk_size)).unwrap_or(0),
@@ -529,7 +529,7 @@ async fn download_big(
     }
     if !header.encrypted() && blob_hasher.finish() != *h {
         cx.delete_temp(&temp).await?;
-        return Err(SyncError::Corrupt("хэш скачанного блоба не совпал".into()));
+        return Err(SyncError::Corrupt("downloaded blob hash mismatch".into()));
     }
     let plain = plain_hasher.finish();
     let Some(expect) = expect else {

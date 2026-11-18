@@ -28,9 +28,11 @@ pub struct HistoryQuery {
 fn decode_path_param(s: &str) -> ApiResult<pb::Path> {
     let bytes = URL_SAFE_NO_PAD
         .decode(s.trim_end_matches('='))
-        .map_err(|_| ApiError::bad_request("bad_path", "path — base64url от protobuf Path"))?;
+        .map_err(|_| {
+            ApiError::bad_request("bad_path", "path must be a base64url-encoded protobuf Path")
+        })?;
     let p = pb::Path::decode(&bytes[..])
-        .map_err(|_| ApiError::bad_request("bad_path", "path не разбирается"))?;
+        .map_err(|_| ApiError::bad_request("bad_path", "cannot decode path"))?;
     validate_proto_path(&p).map_err(|e| ApiError::bad_request("bad_path", e.to_string()))?;
     Ok(p)
 }
@@ -93,7 +95,7 @@ pub async fn purge_deleted(
     if !req.seqs.is_empty() && req.seqs.len() != req.paths.len() {
         return Err(ApiError::bad_request(
             "bad_field",
-            "seqs: по одному на путь или пусто",
+            "seqs must be empty or contain one entry per path",
         ));
     }
     let seqs = req.seqs;
@@ -116,7 +118,7 @@ pub async fn purge_history(
 ) -> ApiResult<Proto<pb::PurgeResult>> {
     let p = req
         .path
-        .ok_or_else(|| ApiError::bad_request("bad_path", "нужен путь"))?;
+        .ok_or_else(|| ApiError::bad_request("bad_path", "path required"))?;
     validate_proto_path(&p).map_err(|e| ApiError::bad_request("bad_path", e.to_string()))?;
     let key = canonical_encode(&p);
     let before = req.before_rev;
@@ -143,7 +145,7 @@ pub async fn put_retention(
     if !(1..=3650).contains(&req.days) {
         return Err(ApiError::bad_request(
             "bad_retention",
-            "окно хранения: 1–3650 дней",
+            "retention must be between 1 and 3650 days",
         ));
     }
     let days = req.days;
@@ -180,7 +182,7 @@ fn if_match(h: &HeaderMap) -> ApiResult<u64> {
     };
     let s = v
         .to_str()
-        .map_err(|_| ApiError::bad_request("bad_if_match", "неверный If-Match"))?;
+        .map_err(|_| ApiError::bad_request("bad_if_match", "invalid If-Match"))?;
     s.trim()
         .trim_start_matches("W/")
         .trim_matches('"')

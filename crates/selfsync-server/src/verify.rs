@@ -107,14 +107,14 @@ fn hash_file(path: &Path) -> io::Result<(Hash, u64)> {
 
 fn show_path(bytes: &[u8]) -> String {
     match canonical_decode(bytes) {
-        Ok(p) if p.encrypted => "(зашифрованный путь)".to_owned(),
+        Ok(p) if p.encrypted => "(encrypted path)".to_owned(),
         Ok(p) => p
             .segments
             .iter()
             .map(|s| String::from_utf8_lossy(s).into_owned())
             .collect::<Vec<_>>()
             .join("/"),
-        Err(_) => "(путь не разбирается)".to_owned(),
+        Err(_) => "(invalid path)".to_owned(),
     }
 }
 
@@ -148,7 +148,7 @@ fn check_key(c: &Connection) -> rusqlite::Result<Option<String>> {
     match meta_blob(c, "vault_key")? {
         Some(rec) => Ok(selfsync_core::crypto::parse_record(&rec)
             .err()
-            .map(|e| format!("запись ключа шифрования не разбирается: {e}"))),
+            .map(|e| format!("cannot decode encryption key record: {e}"))),
         None => {
             let encrypted: bool = c.query_row(
                 "SELECT EXISTS(SELECT 1 FROM files WHERE substr(path, 1, 1) = x'01')",
@@ -156,7 +156,7 @@ fn check_key(c: &Connection) -> rusqlite::Result<Option<String>> {
                 |r| r.get(0),
             )?;
             Ok(encrypted
-                .then(|| "есть зашифрованные пути, но нет записи ключа шифрования".to_owned()))
+                .then(|| "encrypted paths exist without an encryption key record".to_owned()))
         }
     }
 }
@@ -172,7 +172,7 @@ impl Progress {
         if self.on && self.last.elapsed() >= Duration::from_secs(1) {
             self.last = Instant::now();
             eprintln!(
-                "vault {name}: {done}/{total} блобов, {}",
+                "vault {name}: {done}/{total} blobs, {}",
                 crate::cmd::fmt_bytes(bytes)
             );
         }
@@ -278,7 +278,7 @@ pub fn verify_vault(
         match quarantine(&v.blobs, h) {
             Ok(()) => want.push(*h),
             Err(e) => {
-                tracing::warn!(blob = %h.to_hex(), error = %e, "битый блоб не убран в карантин")
+                tracing::warn!(blob = %h.to_hex(), error = %e, "damaged blob could not be quarantined")
             }
         }
     }
@@ -338,7 +338,7 @@ fn repair(
         .map(|d| d.join("blobs").join(&hex[..2]).join(&hex))
         .find(|p| p.is_file())
     else {
-        return Err("нет в бэкапе");
+        return Err("not in backup");
     };
     let attempt = || -> io::Result<bool> {
         let tmp = store.temp_path()?;
@@ -359,10 +359,10 @@ fn repair(
     };
     match attempt() {
         Ok(true) => Ok(()),
-        Ok(false) => Err("в бэкапе тоже повреждён"),
+        Ok(false) => Err("backup copy is also damaged"),
         Err(e) => {
-            tracing::warn!(blob = %hex, error = %e, "восстановление из бэкапа не удалось");
-            Err("ошибка ввода-вывода при восстановлении")
+            tracing::warn!(blob = %hex, error = %e, "could not restore from backup");
+            Err("I/O error during restore")
         }
     }
 }

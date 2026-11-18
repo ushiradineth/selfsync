@@ -140,7 +140,7 @@ pub fn fail(c: &Connection, keys: &[Key], now: i64) -> rusqlite::Result<()> {
                 "UPDATE throttle SET blocked_until = ?2 WHERE key = ?1",
                 params![k.key, now.saturating_add(ms(k.rule.block))],
             )?;
-            tracing::warn!(key = %k.key, failures, "лимит неудачных попыток: блокировка");
+            tracing::warn!(key = %k.key, failures, "failed-attempt rate limit: blocked");
         }
     }
     Ok(())

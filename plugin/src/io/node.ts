@@ -34,8 +34,6 @@ export interface NodeBackendOptions {
 export class NodeBackend implements FileBackend {
   /** Листинги каталогов для настоящего имени (регистронезависимые ФС). */
   private names = new DirNames();
-  /** Каталоги vault'а, которые недавно были обычными папками (не ссылками). */
-  private realDirs = new RealDirs();
 
   constructor(
     /** Абсолютный путь к vault'у. */
@@ -52,6 +50,20 @@ export class NodeBackend implements FileBackend {
 
   private stored(name: string): string {
     return `${this.store}/${name}`;
+  }
+
+  private async insideStore(name: string): Promise<void> {
+    if (this.store.startsWith(`${this.root}/`)) {
+      await this.inside(`${this.store.slice(this.root.length + 1)}/${name}`);
+      return;
+    }
+    let cur = this.store;
+    for (const part of ["", ...name.split("/")]) {
+      if (part) cur += `/${part}`;
+      const st = await this.fsp.lstat(cur).catch(missing);
+      if (!st) return;
+      if (st.isSymbolicLink()) throw new Error(`${cur}: symbolic links are not allowed in plugin storage`);
+    }
   }
 
   async list(): Promise<FileMeta[]> {
@@ -78,30 +90,26 @@ export class NodeBackend implements FileBackend {
         }),
       );
     };
-    this.realDirs.clear();
     await walk("");
-    for (const m of out) if (m.dir) this.realDirs.mark(m.path);
     return out;
   }
 
   /**
    * Первая символическая ссылка на пути — сама запись или папка выше (корень vault'а
    * не в счёт). Путь через ссылку уходит за пределы vault'а: такие пути не читаются
-   * и не меняются. Проверяется по `lstat` каждой папки на пути; недавно проверенные
-   * обычные папки помнятся (`RealDirs`).
+   * и не меняются. Every parent is checked on each operation; scan results are never trusted
+   * for later writes.
    */
   private async linkOn(path: string): Promise<string | null> {
     let cur = "";
     for (const part of path.split("/")) {
       if (part === "") continue;
       cur = cur ? `${cur}/${part}` : part;
-      if (this.realDirs.known(cur)) continue;
       const st = await this.fsp.lstat(this.abs(cur)).catch(missing);
       // Дальше ничего нет — и ссылок тоже.
       if (!st) return null;
       if (st.isSymbolicLink()) return cur;
       if (!st.isDirectory()) return null;
-      this.realDirs.mark(cur);
     }
     return null;
   }
@@ -110,7 +118,7 @@ export class NodeBackend implements FileBackend {
   private async inside(...paths: string[]): Promise<void> {
     for (const path of paths) {
       const link = await this.linkOn(path);
-      if (link !== null) throw new Error(`${path}: путь ведёт через символическую ссылку ${link} — вне vault'а не пишем`);
+      if (link !== null) throw new Error(`${path}: path traverses symbolic link ${link}; refusing access outside the vault`);
     }
   }
 
@@ -227,7 +235,7 @@ export class NodeBackend implements FileBackend {
     for (const name of asideNames(path)) {
       if (!(await this.fsp.lstat(this.abs(name)).catch(missing))) return name;
     }
-    throw new Error(`${path}: нет свободного временного имени`);
+    throw new Error(`${path}: no available temporary filename`);
   }
 
   async rename(from: string, to: string): Promise<void> {
@@ -235,7 +243,6 @@ export class NodeBackend implements FileBackend {
     await this.fsp.mkdir(this.abs(parentOf(to)), { recursive: true });
     await this.fsp.rename(this.abs(from), this.abs(to));
     this.names.removed(from);
-    this.realDirs.removed(from);
     this.names.added(to);
   }
 
@@ -250,14 +257,12 @@ export class NodeBackend implements FileBackend {
     try {
       await this.fsp.rmdir(this.abs(path));
       this.names.removed(path);
-      this.realDirs.removed(path);
       return true;
     } catch (e) {
       const code = (e as { code?: string }).code;
       if (code === "ENOENT") {
         this.names.removed(path);
-        this.realDirs.removed(path);
-        return true;
+          return true;
       }
       if (code === "ENOTEMPTY" || code === "EEXIST") return false;
       throw e;
@@ -280,16 +285,19 @@ export class NodeBackend implements FileBackend {
   }
 
   async tempWrite(name: string, offset: number, data: Uint8Array): Promise<void> {
+    await this.insideStore(`tmp/${name}`);
     const f = this.stored(`tmp/${name}`);
     if (offset === 0) {
       await this.fsp.mkdir(this.stored("tmp"), { recursive: true });
       await writeDurable(this.fsp, f, data);
       return;
     }
-    const fh = await this.fsp.open(f, "r+");
+    const fh = await this.fsp.open(f, this.fsp.constants.O_RDWR | this.fsp.constants.O_NOFOLLOW);
     try {
-      const { size } = await fh.stat();
-      if (size < offset) throw new Error(`разрыв во временном файле ${name}: ${size} < ${offset}`);
+      const st = await fh.stat();
+      if (!st.isFile() || st.nlink > 1) throw new Error(`${f}: unsafe temporary file`);
+      const { size } = st;
+      if (size < offset) throw new Error(`gap in temporary file ${name}: ${size} < ${offset}`);
       await fh.truncate(offset);
       await writeFully(fh, data, offset);
       await fh.sync();
@@ -299,6 +307,7 @@ export class NodeBackend implements FileBackend {
   }
 
   async tempRead(name: string, offset: number, len: number): Promise<Uint8Array | null> {
+    await this.insideStore(`tmp/${name}`);
     return readRange(this.fsp, this.stored(`tmp/${name}`), offset, len);
   }
 
@@ -307,6 +316,7 @@ export class NodeBackend implements FileBackend {
   }
 
   async tempCommit(name: string, path: string, expect: Expect): Promise<WriteOutcome> {
+    await this.insideStore(`tmp/${name}`);
     await this.inside(path);
     if (!satisfies(await this.stat(path), expect)) return { kind: "precondition" };
     await this.fsp.mkdir(this.abs(parentOf(path)), { recursive: true });
@@ -314,10 +324,12 @@ export class NodeBackend implements FileBackend {
   }
 
   async storeRead(name: string): Promise<Uint8Array | null> {
+    await this.insideStore(name);
     return this.fsp.readFile(this.stored(name)).then((b) => new Uint8Array(b), missing);
   }
 
   async storeWrite(name: string, data: Uint8Array): Promise<void> {
+    await this.insideStore(`${name}${TEMP_SUFFIX}`);
     const f = this.stored(name);
     await this.fsp.mkdir(parentOf(f), { recursive: true });
     await writeDurable(this.fsp, f + TEMP_SUFFIX, data);
@@ -326,37 +338,6 @@ export class NodeBackend implements FileBackend {
 
   async storeDelete(name: string): Promise<void> {
     await this.fsp.rm(this.stored(name), { force: true });
-  }
-}
-
-/**
- * Папки vault'а, которые недавно были обычными (не символическими ссылками), — чтобы
- * не проверять каждую папку пути на каждой операции. Свои удаления и переименования
- * вносятся сразу; чужая замена папки ссылкой видна не позже чем через `ttlMs`.
- */
-class RealDirs {
-  private dirs = new Map<string, number>();
-
-  constructor(
-    private ttlMs = 2000,
-    private now: () => number = Date.now,
-  ) {}
-
-  known(dir: string): boolean {
-    const at = this.dirs.get(dir);
-    return at !== undefined && this.now() - at < this.ttlMs;
-  }
-
-  mark(dir: string): void {
-    this.dirs.set(dir, this.now());
-  }
-
-  removed(path: string): void {
-    for (const d of [...this.dirs.keys()]) if (d === path || d.startsWith(`${path}/`)) this.dirs.delete(d);
-  }
-
-  clear(): void {
-    this.dirs.clear();
   }
 }
 
@@ -382,7 +363,13 @@ function fileMeta(path: string, st: Stats): FileMeta {
 
 /** Запись с fsync: после rename поверх старого файла не останется пустышки. */
 async function writeDurable(fsp: FsPromises, file: string, data: Uint8Array): Promise<void> {
-  const fh = await fsp.open(file, "w");
+  // Never truncate an existing inode: temporary names can be planted as symbolic
+  // or hard links to files outside the vault. Unlinking replaces the directory
+  // entry only; exclusive creation also closes the leaf-name replacement race.
+  const old = await fsp.lstat(file).catch(missing);
+  if (old && (!old.isFile() || old.nlink > 1)) throw new Error(`${file}: unsafe temporary file`);
+  if (old) await fsp.unlink(file);
+  const fh = await fsp.open(file, "wx", 0o600);
   try {
     await writeFully(fh, data, 0);
     await fh.sync();
@@ -399,7 +386,7 @@ async function writeFully(fh: FileHandle, data: Uint8Array, pos: number): Promis
   let off = 0;
   while (off < data.length) {
     const { bytesWritten } = await fh.write(data, off, data.length - off, pos + off);
-    if (bytesWritten <= 0) throw new Error(`запись не продвигается: ${off} из ${data.length} байт`);
+    if (bytesWritten <= 0) throw new Error(`write is not making progress: ${off} of ${data.length} bytes`);
     off += bytesWritten;
   }
 }

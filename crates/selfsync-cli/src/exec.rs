@@ -46,8 +46,7 @@ fn lock_folder(state: &Path) -> anyhow::Result<Option<std::fs::File>> {
         }
         if std::time::Instant::now() >= deadline {
             anyhow::bail!(
-                "папка синхронизируется другим процессом ({}). Остановите его, например \
-                 `systemctl --user stop selfsync-cli@<папка>`, и повторите",
+                "another process is syncing this folder ({}); stop it, for example with `systemctl --user stop selfsync-cli@<folder>`, and retry",
                 state.join(LOCK_FILE).display()
             );
         }
@@ -188,16 +187,29 @@ impl Exec {
             Action::WriteTemp {
                 temp, offset, data, ..
             } => {
+                self.inside(&format!("{STATE_DIR}/tmp/{temp}")).await?;
                 let f = self.temp(&temp);
                 if offset == 0 {
                     tokio::fs::create_dir_all(self.state.join("tmp")).await?;
                     write_durable(&f, &data).await?;
                 } else {
-                    let mut fh = tokio::fs::OpenOptions::new().write(true).open(&f).await?;
-                    let size = fh.metadata().await?.len();
+                    let mut options = tokio::fs::OpenOptions::new();
+                    options.write(true);
+                    #[cfg(unix)]
+                    options.custom_flags(libc::O_NOFOLLOW);
+                    let mut fh = options.open(&f).await?;
+                    let md = fh.metadata().await?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::MetadataExt;
+                        if md.nlink() > 1 {
+                            return Err(std::io::Error::other("unsafe temporary hard link"));
+                        }
+                    }
+                    let size = md.len();
                     if size < offset {
                         return Ok(failed(format!(
-                            "разрыв во временном файле {temp}: {size} < {offset}"
+                            "gap in temporary file {temp}: {size} < {offset}"
                         )));
                     }
                     fh.set_len(offset).await?;
@@ -292,6 +304,8 @@ impl Exec {
                 }
             }
             Action::SaveIndex { id, data } => {
+                self.inside(&format!("{STATE_DIR}/index.bin{TEMP_SUFFIX}"))
+                    .await?;
                 // Задача синка и, например, решение конфликта сохраняют индекс
                 // параллельно: без замка второй rename не находит временный файл.
                 let mut saved = self.index_saved.lock().await;
@@ -311,6 +325,7 @@ impl Exec {
                 Err(e) => return Err(e),
             },
             Action::CacheWrite { key, data, .. } => {
+                self.inside(&format!("{STATE_DIR}/cache/{key}")).await?;
                 tokio::fs::create_dir_all(self.state.join("cache")).await?;
                 write_durable(&self.cache(&key), &data).await?;
                 IoResult::Done
@@ -322,7 +337,7 @@ impl Exec {
                 }
                 IoResult::Done
             }
-            other => failed(format!("действие без ответа: {other:?}")),
+            other => failed(format!("action has no response: {other:?}")),
         })
     }
 
@@ -452,7 +467,7 @@ impl Exec {
     async fn inside(&self, path: &str) -> std::io::Result<()> {
         match self.link_on(path).await? {
             Some(link) => Err(std::io::Error::other(format!(
-                "{path}: путь ведёт через символическую ссылку {link} — вне vault'а не пишем"
+                "{path}: path traverses symbolic link {link}; refusing access outside the vault"
             ))),
             None => Ok(()),
         }
@@ -632,7 +647,7 @@ impl Exec {
             }
         }
         Err(std::io::Error::other(format!(
-            "{path}: нет свободного временного имени"
+            "{path}: no available temporary filename"
         )))
     }
 
@@ -703,7 +718,28 @@ fn mtime_ms(md: &std::fs::Metadata) -> i64 {
 
 /// Запись с fsync: rename поверх старого файла не оставит пустышку после сбоя питания.
 async fn write_durable(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    let mut f = tokio::fs::File::create(path).await?;
+    match tokio::fs::symlink_metadata(path).await {
+        Ok(md) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if md.nlink() > 1 {
+                    return Err(std::io::Error::other("unsafe temporary hard link"));
+                }
+            }
+            if !md.is_file() {
+                return Err(std::io::Error::other("unsafe temporary file"));
+            }
+            tokio::fs::remove_file(path).await?;
+        }
+        Err(e) if not_found(&e) => {}
+        Err(e) => return Err(e),
+    }
+    let mut options = tokio::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut f = options.open(path).await?;
     f.write_all(data).await?;
     f.sync_all().await
 }
@@ -730,6 +766,28 @@ async fn read_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn temporary_links_cannot_overwrite_external_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside.md");
+        let temp = dir.path().join("note.md.selfsync-tmp");
+        std::fs::write(&outside, b"original").unwrap();
+        for symbolic in [true, false] {
+            if symbolic {
+                std::os::unix::fs::symlink(&outside, &temp).unwrap();
+            } else {
+                std::fs::hard_link(&outside, &temp).unwrap();
+            }
+            assert!(write_durable(&temp, b"replacement").await.is_err());
+            assert_eq!(std::fs::read(&outside).unwrap(), b"original");
+            std::fs::remove_file(&temp).unwrap();
+        }
+        write_durable(&temp, b"safe").await.unwrap();
+        write_durable(&temp, b"retry").await.unwrap();
+        assert_eq!(std::fs::read(&temp).unwrap(), b"retry");
+    }
 
     fn write(path: &str, data: &[u8], expect: Expect) -> Action {
         Action::Write {

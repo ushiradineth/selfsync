@@ -111,7 +111,7 @@ pub fn check_proto(headers: &HeaderMap) -> ApiResult<u32> {
     let Some(v) = headers.get(HEADER_PROTO) else {
         return Err(ApiError::bad_request(
             "proto_header_missing",
-            "нужен заголовок X-Selfsync-Proto",
+            "X-Selfsync-Proto header required",
         ));
     };
     match v.to_str().ok().and_then(parse_proto) {
@@ -119,7 +119,7 @@ pub fn check_proto(headers: &HeaderMap) -> ApiResult<u32> {
         _ => Err(ApiError::new(
             StatusCode::UPGRADE_REQUIRED,
             "proto_unsupported",
-            format!("сервер поддерживает протокол версии {PROTO_VERSION}"),
+            format!("server supports protocol version {PROTO_VERSION}"),
         )),
     }
 }
@@ -132,7 +132,7 @@ pub fn client_outdated_for_read_only(minor: u32) -> Option<ApiError> {
         ApiError::new(
             StatusCode::UPGRADE_REQUIRED,
             "client_outdated",
-            "устройство подключено только для чтения: нужен плагин или selfsync-cli 0.2.1 или новее",
+            "read-only device requires plugin or selfsync-cli 0.2.1 or later",
         )
     })
 }
@@ -203,12 +203,8 @@ async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Respo
         && !receives_key
         && !matches!(*req.method(), http::Method::GET | http::Method::HEAD)
     {
-        let mut resp = ApiError::new(
-            StatusCode::FORBIDDEN,
-            "read_only",
-            "устройство подключено только для чтения",
-        )
-        .into_response();
+        let mut resp = ApiError::new(StatusCode::FORBIDDEN, "read_only", "device is read-only")
+            .into_response();
         resp.extensions_mut().insert(DeviceTag(dev.id));
         return resp;
     }
@@ -223,7 +219,7 @@ async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Respo
                 let mut resp = ApiError::new(
                     StatusCode::UPGRADE_REQUIRED,
                     "client_outdated",
-                    "ключ шифрования vault'а сменён: нужен плагин или selfsync-cli 0.3.0 или новее",
+                    "vault encryption key changed; plugin or selfsync-cli 0.3.0 or later required",
                 )
                 .into_response();
                 resp.extensions_mut().insert(DeviceTag(dev.id));
@@ -314,7 +310,7 @@ async fn access(State(st): State<AppState>, req: Request, next: Next) -> Respons
             .server_db(move |c| Ok(crate::db::server::bump_counter(c, e)?))
             .await
     {
-        tracing::warn!(error = %err.message, "счётчик событий не записан");
+        tracing::warn!(error = %err.message, "could not record event counter");
     }
     if !st.first_request_done.swap(true, Ordering::SeqCst) {
         crate::sweep::spawn_after_first_request(&st);
@@ -335,14 +331,14 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         let bytes = Bytes::from_request(req, state).await.map_err(|e| {
             if e.status() == StatusCode::PAYLOAD_TOO_LARGE {
-                ApiError::too_large("тело запроса больше лимита")
+                ApiError::too_large("request body exceeds size limit")
             } else {
-                ApiError::bad_request("bad_body", "не удалось прочитать тело")
+                ApiError::bad_request("bad_body", "cannot read request body")
             }
         })?;
-        T::decode(bytes)
-            .map(Proto)
-            .map_err(|_| ApiError::bad_request("bad_protobuf", "тело не разбирается как protobuf"))
+        T::decode(bytes).map(Proto).map_err(|_| {
+            ApiError::bad_request("bad_protobuf", "request body is not valid protobuf")
+        })
     }
 }
 

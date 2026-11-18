@@ -30,29 +30,29 @@ const MODE_ENCRYPTED_EPOCH: u8 = 2;
 /// Причина отказа в пути. Коды стабильны: они уходят клиенту в `Rejected.code`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PathError {
-    #[error("пустой путь")]
+    #[error("empty path")]
     Empty,
-    #[error("слишком много сегментов")]
+    #[error("too many path segments")]
     TooManySegments,
-    #[error("пустой сегмент")]
+    #[error("empty path segment")]
     EmptySegment,
-    #[error("сегмент `.` или `..`")]
+    #[error("path segment is . or ..")]
     DotSegment,
-    #[error("сегмент не в UTF-8")]
+    #[error("path segment is not UTF-8")]
     NotUtf8,
-    #[error("сегмент не в NFC")]
+    #[error("path segment is not NFC")]
     NotNfc,
-    #[error("управляющий символ в сегменте")]
+    #[error("control character in path segment")]
     ControlChar,
-    #[error("разделитель внутри сегмента")]
+    #[error("separator in path segment")]
     Separator,
-    #[error("пробел или точка в конце сегмента")]
+    #[error("path segment ends in a space or dot")]
     TrailingSpaceOrDot,
-    #[error("сегмент длиннее {MAX_SEGMENT_BYTES} байт")]
+    #[error("path segment exceeds {MAX_SEGMENT_BYTES} bytes")]
     SegmentTooLong,
-    #[error("путь длиннее {MAX_PATH_BYTES} байт")]
+    #[error("path exceeds {MAX_PATH_BYTES} bytes")]
     PathTooLong,
-    #[error("повреждённое каноническое кодирование")]
+    #[error("invalid canonical encoding")]
     BadEncoding,
 }
 

@@ -5,7 +5,7 @@
 #   docker compose up -d
 #   docker compose run --rm selfsync link --vault notes --name phone
 #
-# Образ — ghcr.io/darkildo/selfsync (amd64, arm64), собран из бинаря релиза
+# Образ — ghcr.io/ushiradineth/selfsync (amd64, arm64), собран из бинаря релиза
 # server-X.Y.Z. Обновление: новая версия в SELFSYNC_VERSION, затем
 #   docker compose pull && docker compose up -d
 # Собрать тот же образ у себя, без реестра (бинарь релиза, сверка с SHA256SUMS):
@@ -28,7 +28,7 @@ x-hardening: &hardening
 services:
   selfsync:
     <<: *hardening
-    image: ghcr.io/darkildo/selfsync:${SELFSYNC_VERSION:?задайте SELFSYNC_VERSION в .env}
+    image: ghcr.io/ushiradineth/selfsync:${SELFSYNC_VERSION:?задайте SELFSYNC_VERSION в .env}
     restart: unless-stopped
     tmpfs:
       - /tmp

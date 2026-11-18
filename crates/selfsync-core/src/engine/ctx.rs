@@ -20,9 +20,9 @@ use crate::path::VaultPath;
 /// Ошибка цикла синка.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SyncError {
-    #[error("сеть: {0}")]
+    #[error("network: {0}")]
     Network(String),
-    #[error("ошибка сервера {status}: {code}")]
+    #[error("server error {status}: {code}")]
     Server { status: u16, code: String },
     #[error("HTTP {status}: {code} {message}")]
     Http {
@@ -30,34 +30,34 @@ pub enum SyncError {
         code: String,
         message: String,
     },
-    #[error("токен не принят")]
+    #[error("token rejected")]
     Unauthorized,
-    #[error("устройство подключено только для чтения")]
+    #[error("device is read-only")]
     ReadOnly,
-    #[error("слишком много неудачных попыток, повтор через {retry_after_s} с")]
+    #[error("too many failed attempts; retry in {retry_after_s} s")]
     RateLimited { retry_after_s: u64 },
-    #[error("протокол не поддерживается сервером")]
+    #[error("server does not support this protocol")]
     ProtoUnsupported(u32),
     /// Сервер старее клиента и не умеет нужного (текст — что именно и что делать).
     #[error("{0}")]
     ServerOutdated(String),
-    #[error("ответ сервера не разбирается: {0}")]
+    #[error("cannot decode server response: {0}")]
     Protocol(String),
-    #[error("ввод-вывод: {0}")]
+    #[error("I/O: {0}")]
     Io(String),
-    #[error("синк приостановлен: {0}")]
+    #[error("sync paused: {0}")]
     Paused(String),
-    #[error("синк остановлен: {0}")]
+    #[error("sync stopped: {0}")]
     Blocked(String),
-    #[error("блоб не найден на сервере")]
+    #[error("blob not found on server")]
     BlobGone,
     /// Место vault'а (или сервера) закончилось: новый блоб не принят.
-    #[error("место на сервере закончилось: {0}")]
+    #[error("server storage full: {0}")]
     QuotaExceeded(String),
-    #[error("данные повреждены: {0}")]
+    #[error("data damaged: {0}")]
     Corrupt(String),
     /// Режим vault'а сменился посреди цикла — начать цикл заново.
-    #[error("перезапуск цикла")]
+    #[error("restarting sync cycle")]
     Restart,
 }
 
@@ -612,7 +612,7 @@ impl Ctx {
         if self.with_mut(|s| s.notified.insert(format!("name:{bad}"))) {
             self.log(
                 LogLevel::Warn,
-                format!("{bad}: имя недопустимо на этом устройстве — файл здесь не создаётся"),
+                format!("{bad}: filename is invalid on this device; file will not be created here"),
             );
             self.notify(Notice::UnsupportedName { path: bad });
         }
@@ -658,7 +658,7 @@ impl Ctx {
             }
             IoResult::Failed { message } => Err(SyncError::Network(message)),
             other => Err(SyncError::Io(format!(
-                "неожиданный ответ на HTTP: {other:?}"
+                "unexpected HTTP response: {other:?}"
             ))),
         }
     }
@@ -682,7 +682,7 @@ impl Ctx {
                 let forgot = self.with_mut(|s| s.link_found(&key));
                 self.log(
                     LogLevel::Info,
-                    format!("{key}: символическая ссылка на пути — не синхронизируется, забыто {forgot:?}"),
+                    format!("{key}: path traverses a symbolic link; skipped, forgot {forgot:?}"),
                 );
                 Err(SyncError::Restart)
             }
@@ -753,7 +753,7 @@ impl Ctx {
             Err(e) => {
                 self.log(
                     LogLevel::Warn,
-                    format!("{path}: вытесненная версия осталась в {aside}: {e}"),
+                    format!("{path}: displaced version remains at {aside}: {e}"),
                 );
                 self.with_mut(|s| s.need_full_scan = true);
                 return;
@@ -769,7 +769,7 @@ impl Ctx {
             r => {
                 self.log(
                     LogLevel::Warn,
-                    format!("{path}: вытесненная версия осталась в {aside}: {r:?}"),
+                    format!("{path}: displaced version remains at {aside}: {r:?}"),
                 );
                 self.with_mut(|s| s.need_full_scan = true);
             }
@@ -807,12 +807,12 @@ impl Ctx {
             if let Err(e) = self.trash(path, expect).await {
                 self.log(
                     LogLevel::Warn,
-                    format!("{path}: не удалось убрать обрезанный файл: {e}"),
+                    format!("{path}: could not remove truncated file: {e}"),
                 );
             }
         }
-        let message = format!("{path}: записано {} байт из {size}", meta.size);
-        self.log(LogLevel::Error, format!("неполная запись {message}"));
+        let message = format!("{path}: wrote {} of {size} bytes", meta.size);
+        self.log(LogLevel::Error, format!("incomplete write: {message}"));
         Err(SyncError::Io(format!("write: {message}")))
     }
 
@@ -1218,6 +1218,6 @@ impl Ctx {
 fn io_err(op: &str, r: IoResult) -> SyncError {
     match r {
         IoResult::Failed { message } => SyncError::Io(format!("{op}: {message}")),
-        other => SyncError::Io(format!("{op}: неожиданный ответ {other:?}")),
+        other => SyncError::Io(format!("{op}: unexpected response {other:?}")),
     }
 }

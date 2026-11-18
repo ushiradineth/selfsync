@@ -15,10 +15,10 @@ use selfsync_core::index::Index;
 #[command(
     name = "selfsync-cli",
     version,
-    about = "Синхронизация папки с сервером selfsync"
+    about = "Synchronize a folder with a selfsync server"
 )]
 struct Cli {
-    /// Синхронизируемая папка.
+    /// Folder to synchronize.
     #[arg(long, global = true, default_value = ".")]
     dir: PathBuf,
     #[command(subcommand)]
@@ -27,169 +27,153 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Подключить папку токеном (`selfsync token add` на сервере).
+    /// Connect a folder using a token from selfsync token add.
     Init {
         #[arg(long)]
         server: String,
         #[arg(long, env = "SELFSYNC_TOKEN")]
         token: String,
-        /// Имя устройства (по умолчанию — имя машины).
+        /// Device name (defaults to hostname).
         #[arg(long)]
         name: Option<String>,
-        /// Сервер работает постоянно (socket/serve): long-poll вместо опроса.
+        /// Use long polling with a persistent server (socket/serve).
         #[arg(long)]
         use_wait: bool,
     },
-    /// Подключить папку одноразовым кодом (`selfsync link`, «Подключить новое
-    /// устройство» или `selfsync-cli join`). Если устройство с кодом передаёт ключ
-    /// шифрования, ключ приходит сюда — пароль не нужен (только с терминалом).
+    /// Connect using a one-time code from selfsync link or selfsync-cli join. With a terminal, the source device can transfer the encryption key without a password.
     Connect {
         #[arg(long, required_unless_present = "link")]
         server: Option<String>,
         #[arg(long, required_unless_present = "link")]
         code: Option<String>,
-        /// Ссылка подключения вместо --server и --code: страница сервера
-        /// (`https://…/join/<код>`) или `obsidian://selfsync-connect?…` из QR.
+        /// Connection link instead of --server and --code: https://.../join/<code> or an obsidian://selfsync-connect QR link.
         #[arg(long, conflicts_with_all = ["server", "code"])]
         link: Option<String>,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         use_wait: bool,
-        /// Не ждать ключ шифрования от устройства с кодом (пароль — при `run`).
+        /// Skip encryption-key handoff; enter the password during run.
         #[arg(long)]
         no_handoff: bool,
     },
-    /// Подключить новое устройство: одноразовый код, ссылка и QR. Если ключ
-    /// шифрования здесь есть (запомнен или --password-file), окно ждёт новое
-    /// устройство и с вашего согласия передаёт ему ключ (только с терминалом).
-    /// QR с секретом обмена остаётся в истории терминала: секрет одноразовый и без
-    /// вашего согласия ключа не даёт, но экран и журнал терминала лучше не показывать.
+    /// Create a one-time code, link and QR code for another device. With a terminal and an unlocked key, approve key handoff to the new device. The QR secret remains in terminal scrollback; keep the terminal private.
     Join {
-        /// Имя будущего устройства (можно изменить при подключении).
+        /// New device name (can be changed when connecting).
         #[arg(long, default_value = "new device")]
         name: String,
-        /// Подключить устройство только для чтения.
+        /// Connect a read-only device.
         #[arg(long)]
         read_only: bool,
-        /// Файл с паролем шифрования (или SELFSYNC_PASSWORD), если ключ не запомнен.
+        /// Encryption password file (or SELFSYNC_PASSWORD) if no key is remembered.
         #[arg(long)]
         password_file: Option<PathBuf>,
-        /// Не передавать ключ шифрования: только код.
+        /// Create a code without transferring the encryption key.
         #[arg(long)]
         no_handoff: bool,
     },
-    /// Синхронизировать: следить за папкой до Ctrl-C (или один цикл с --once).
+    /// Synchronize and watch until Ctrl-C, or run one cycle with --once.
     Run {
         #[arg(long)]
         once: bool,
-        /// Файл с паролем шифрования (или переменная SELFSYNC_PASSWORD).
+        /// Encryption password file (or SELFSYNC_PASSWORD).
         #[arg(long)]
         password_file: Option<PathBuf>,
-        /// Не запоминать ключ в .selfsync/key.
+        /// Do not remember the key in .selfsync/key.
         #[arg(long)]
         no_remember: bool,
-        /// Команда оболочки после каждого цикла, который что-то изменил (в папке, с
-        /// SELFSYNC_DIR, SELFSYNC_PULLED, SELFSYNC_PUSHED, SELFSYNC_CHANGES_FILE).
-        /// По умолчанию — `exec` из .selfsync/config.toml.
+        /// Shell command after each cycle with changes; runs in the folder with SELFSYNC_DIR, SELFSYNC_PULLED, SELFSYNC_PUSHED and SELFSYNC_CHANGES_FILE. Defaults to exec in .selfsync/config.toml.
         #[arg(long)]
         exec: Option<String>,
-        /// Хук дольше этого останавливается (по умолчанию 10m).
+        /// Stop hooks exceeding this duration (default 10m).
         #[arg(long)]
         exec_timeout: Option<String>,
-        /// Отправить удаления, на которых синк остановился: в папке не нашлось
-        /// многих файлов, которые здесь были (страховка от сбоя ФС).
+        /// Confirm deletions blocked because many previously present files were missing (filesystem failure safeguard).
         #[arg(long)]
         allow_deletes: bool,
-        /// Перечитать и сверить содержимое всех файлов, не доверяя размеру и времени
-        /// изменения (правки, которые их не изменили: `cp -p`, `rsync -t`, грубое
-        /// время на FAT): найденные отличия уходят как обычные правки.
+        /// Hash every file instead of trusting size and modification time; unnoticed changes are synced as ordinary edits.
         #[arg(long)]
         verify_content: bool,
     },
-    /// Включить сквозное шифрование vault'а (пароль понадобится всем устройствам).
+    /// Enable end-to-end vault encryption (every device will need the password).
     Encrypt {
-        /// Файл с паролем (или переменная SELFSYNC_PASSWORD).
+        /// Password file (or SELFSYNC_PASSWORD).
         #[arg(long)]
         password_file: Option<PathBuf>,
-        /// Создать и фразу восстановления (24 слова в stdout, один раз). Запись ключа
-        /// станет формата 2: плагин и CLI 0.1.x её не откроют — обновите все устройства.
+        /// Also create a recovery phrase (24 words printed once). Key record becomes format 2; upgrade plugin and CLI 0.1.x devices first.
         #[arg(long)]
         recovery: bool,
     },
-    /// Фраза восстановления зашифрованного vault'а.
+    /// Manage the encrypted vault recovery phrase.
     #[command(subcommand)]
     Recovery(RecoveryCmd),
-    /// Забыли пароль: раскрыть vault фразой восстановления и задать новый пароль.
+    /// Recover a forgotten password using the recovery phrase and set a new password.
     Recover {
-        /// Файл с 24 словами (иначе — ввод с терминала).
+        /// File containing 24 words (otherwise prompt in terminal).
         #[arg(long)]
         phrase_file: Option<PathBuf>,
-        /// Файл с новым паролем (иначе — ввод с терминала).
+        /// File containing the new password (otherwise prompt in terminal).
         #[arg(long)]
         new_password_file: Option<PathBuf>,
-        /// Не запоминать ключ в .selfsync/key.
+        /// Do not remember the key in .selfsync/key.
         #[arg(long)]
         no_remember: bool,
     },
-    /// Сменить ключ шифрования (после отзыва устройства): vault перешифровывается
-    /// новым ключом под тем же паролем, другие устройства попросят пароль заново.
+    /// Rotate the encryption key after revoking a device. Re-encrypts the vault under a new key with the same password; other devices ask for the password again.
     Rekey {
-        /// Файл с паролем (или переменная SELFSYNC_PASSWORD).
+        /// Password file (or SELFSYNC_PASSWORD).
         #[arg(long)]
         password_file: Option<PathBuf>,
     },
-    /// Состояние: подключение, очередь, конфликты.
+    /// Show connection, pending changes and conflicts.
     Status,
-    /// Проверить соединение по шагам: адрес и сертификат, прокси, версия, часы,
-    /// токен, лимит размера запроса, long-poll. Без синка; код выхода 1 при отказе.
+    /// Check address, certificate, proxy, version, clock, token, request limits and long polling without syncing. Exit 1 on failure.
     Check,
-    /// История файла: ревизии на сервере (номер, дата, размер, устройство).
+    /// Show server file history (revision, date, size and device).
     History {
-        /// Путь внутри папки.
+        /// Path inside the folder.
         path: String,
         #[command(flatten)]
         v: VaultArgs,
     },
-    /// Корзина сервера: удалённые файлы и когда они сотрутся окончательно.
+    /// Show deleted files in server trash and their expiration times.
     Trash {
-        /// Показать и те, чей срок уже вышел (сотрутся при ближайшем sweep).
+        /// Include expired files (removed by the next sweep).
         #[arg(long)]
         all: bool,
         #[command(flatten)]
         v: VaultArgs,
     },
-    /// Вернуть файлы из корзины сервера.
+    /// Restore files from server trash.
     Restore {
         #[arg(required = true)]
         paths: Vec<String>,
         #[command(flatten)]
         v: VaultArgs,
     },
-    /// Стереть файлы из корзины сервера окончательно (вместе с историей).
+    /// Permanently erase files and their history from server trash.
     Purge {
         #[arg(required = true)]
         paths: Vec<String>,
-        /// Подтверждение: без него ничего не стирается.
+        /// Confirm permanent deletion.
         #[arg(long)]
         yes: bool,
         #[command(flatten)]
         v: VaultArgs,
     },
-    /// Стереть старые версии файла на сервере (освободить место). Текущая версия и
-    /// последняя перед удалением остаются.
+    /// Remove old server revisions to free space; retains the current revision and the last revision before deletion.
     PurgeHistory {
         path: String,
-        /// Стереть ревизии старше этой (по умолчанию — все старые).
+        /// Remove revisions before this revision (default: all old revisions).
         #[arg(long)]
         before: Option<u64>,
-        /// Подтверждение: без него ничего не стирается.
+        /// Confirm permanent deletion.
         #[arg(long)]
         yes: bool,
         #[command(flatten)]
         v: VaultArgs,
     },
-    /// Откатить файл к ревизии (неотправленная текущая версия остаётся копией рядом).
+    /// Restore a file revision, preserving unsent local changes as a nearby copy.
     Revert {
         path: String,
         #[arg(long)]
@@ -197,23 +181,23 @@ enum Cmd {
         #[command(flatten)]
         v: VaultArgs,
     },
-    /// Нерешённые конфликты.
+    /// List unresolved conflicts.
     Conflicts {
         #[command(flatten)]
         v: VaultArgs,
     },
-    /// Файлы, не скачанные из-за лимита `max_download_size`.
+    /// List files skipped because of max_download_size.
     Skipped {
         #[command(flatten)]
         v: VaultArgs,
     },
-    /// Скачать пропущенный файл несмотря на лимит (дальше он синхронизируется).
+    /// Download a skipped file despite the size limit, then continue syncing it.
     Download {
         path: String,
         #[command(flatten)]
         v: VaultArgs,
     },
-    /// Решить конфликт: оставить обе версии, свою или серверную.
+    /// Resolve a conflict: keep both, local or server version.
     Resolve {
         id: u64,
         #[arg(long, value_enum)]
@@ -223,9 +207,9 @@ enum Cmd {
     },
 }
 
-/// Первая выпущенная версия, которая открывает запись ключа формата 2 (с фразой).
+/// First released version supporting format 2 key records with recovery phrases.
 const RECOVERY_MIN: &str = "0.2.1";
-/// Первая версия, которая понимает смену ключа (поколения, запись формата 3).
+/// First version supporting key rotation, epochs and format 3 key records.
 const REKEY_MIN: &str = "0.3.0";
 
 fn main() -> ExitCode {
@@ -250,7 +234,7 @@ fn main() -> ExitCode {
     match rt.block_on(real_main(cli)) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("ошибка: {e:#}");
+            eprintln!("error: {e:#}");
             ExitCode::FAILURE
         }
     }
@@ -264,23 +248,23 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             let cmd = VaultCommand::Ui(UiCommand::History { path: path.clone() });
             return vault_command(&dir, v, cmd, |r, json| {
                 let UiResult::History { revisions } = r else {
-                    anyhow::bail!("неожиданный ответ: {r:?}");
+                    anyhow::bail!("unexpected response: {r:?}");
                 };
                 if json {
                     return print_json(&revisions);
                 }
                 if revisions.is_empty() {
-                    println!("у {path} нет истории на сервере");
+                    println!("{path} has no server history");
                 }
                 for x in revisions {
                     let what = if x.deleted {
-                        "удалён".to_owned()
+                        "deleted".to_owned()
                     } else {
-                        format!("{} байт", x.size)
+                        format!("{} bytes", x.size)
                     };
                     let from = x
                         .renamed_from
-                        .map(|f| format!(" (из {f})"))
+                        .map(|f| format!(" (of {f})"))
                         .unwrap_or_default();
                     println!(
                         "{}\t{}\t{what}\t#{}{from}",
@@ -303,7 +287,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             .unwrap_or(i64::MAX);
             return vault_command(&dir, v, cmd, |r, json| {
                 let UiResult::Deleted { items } = r else {
-                    anyhow::bail!("неожиданный ответ: {r:?}");
+                    anyhow::bail!("unexpected response: {r:?}");
                 };
                 let items: Vec<_> = items
                     .into_iter()
@@ -313,11 +297,11 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     return print_json(&items);
                 }
                 if items.is_empty() {
-                    println!("корзина пуста");
+                    println!("trash is empty");
                 }
                 for x in items {
                     println!(
-                        "{}\tудалён {}\tсотрётся {}\t{} байт",
+                        "{}\tdeleted {}\tpurge after {}\t{} bytes",
                         x.path,
                         fmt_time(x.deleted_at),
                         fmt_time(x.expires_at),
@@ -333,19 +317,19 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             let cmd = VaultCommand::Ui(UiCommand::RestoreDeleted { paths });
             return vault_command(&dir, v, cmd, |r, json| {
                 let UiResult::Restored { count } = r else {
-                    anyhow::bail!("неожиданный ответ: {r:?}");
+                    anyhow::bail!("unexpected response: {r:?}");
                 };
                 if json {
                     return print_json(&serde_json::json!({ "count": count }));
                 }
-                println!("восстановлено: {count}");
+                println!("restored: {count}");
                 Ok(())
             })
             .await;
         }
         Cmd::Purge { paths, yes, v } => {
             if !yes {
-                anyhow::bail!("стирание из корзины необратимо: добавьте --yes");
+                anyhow::bail!("purging trash is irreversible; add --yes");
             }
             let paths = paths.iter().map(|p| vault_path(&dir, p)).collect();
             let cmd = VaultCommand::Ui(UiCommand::PurgeDeleted {
@@ -354,12 +338,12 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             });
             return vault_command(&dir, v, cmd, |r, json| {
                 let UiResult::Restored { count } = r else {
-                    anyhow::bail!("неожиданный ответ: {r:?}");
+                    anyhow::bail!("unexpected response: {r:?}");
                 };
                 if json {
                     return print_json(&serde_json::json!({ "count": count }));
                 }
-                println!("стёрто окончательно: {count}");
+                println!("permanently deleted: {count}");
                 Ok(())
             })
             .await;
@@ -371,7 +355,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             v,
         } => {
             if !yes {
-                anyhow::bail!("стирание старых версий необратимо: добавьте --yes");
+                anyhow::bail!("purging old revisions is irreversible; add --yes");
             }
             let path = vault_path(&dir, &path);
             let cmd = VaultCommand::Ui(UiCommand::PurgeHistory {
@@ -380,12 +364,12 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             });
             return vault_command(&dir, v, cmd, |r, json| {
                 let UiResult::Restored { count } = r else {
-                    anyhow::bail!("неожиданный ответ: {r:?}");
+                    anyhow::bail!("unexpected response: {r:?}");
                 };
                 if json {
                     return print_json(&serde_json::json!({ "count": count }));
                 }
-                println!("{path}: стёрто старых версий — {count}");
+                println!("{path}: purged {count} old revisions");
                 Ok(())
             })
             .await;
@@ -400,7 +384,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 if json {
                     return print_json(&serde_json::json!({ "ok": true }));
                 }
-                println!("{path}: ревизия {rev} восстановлена");
+                println!("{path}: restored revision {rev}");
                 Ok(())
             })
             .await;
@@ -409,16 +393,16 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             let cmd = VaultCommand::Ui(UiCommand::Conflicts);
             return vault_command(&dir, v, cmd, |r, json| {
                 let UiResult::Conflicts { items } = r else {
-                    anyhow::bail!("неожиданный ответ: {r:?}");
+                    anyhow::bail!("unexpected response: {r:?}");
                 };
                 if json {
                     return print_json(&items);
                 }
                 if items.is_empty() {
-                    println!("конфликтов нет");
+                    println!("no conflicts");
                 }
                 for c in items {
-                    println!("{}\t{}\tкопия {}\t{}", c.id, c.path, c.copy, fmt_time(c.at));
+                    println!("{}\t{}\tcopy {}\t{}", c.id, c.path, c.copy, fmt_time(c.at));
                 }
                 Ok(())
             })
@@ -428,13 +412,13 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             let cmd = VaultCommand::Ui(UiCommand::Skipped);
             return vault_command(&dir, v, cmd, |r, json| {
                 let UiResult::Skipped { files } = r else {
-                    anyhow::bail!("неожиданный ответ: {r:?}");
+                    anyhow::bail!("unexpected response: {r:?}");
                 };
                 if json {
                     return print_json(&files);
                 }
                 if files.is_empty() {
-                    println!("пропущенных нет");
+                    println!("no skipped files");
                 }
                 for f in files {
                     println!("{}\t{}", f.path, f.size);
@@ -456,9 +440,9 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             if json {
                 print_json(&serde_json::json!({ "path": path, "downloaded": ok }))?;
             } else if ok {
-                println!("скачан: {path}");
+                println!("downloaded: {path}");
             } else {
-                eprintln!("{path}: не скачался — подробности в журнале, повторите позже");
+                eprintln!("{path}: download failed; see the log and retry later");
             }
             return Ok(if ok { code } else { ExitCode::from(1) });
         }
@@ -474,14 +458,16 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 .and_then(|b| Index::decode(&b).ok())
                 .is_some_and(|idx| idx.conflicts.iter().any(|c| c.id == id));
             if !known {
-                anyhow::bail!("конфликта {id} нет: список — selfsync-cli conflicts");
+                anyhow::bail!(
+                    "conflict {id} not found; list conflicts with selfsync-cli conflicts"
+                );
             }
             let cmd = VaultCommand::Resolve { id, choice };
             return vault_command(&dir, v, cmd, |_, json| {
                 if json {
                     return print_json(&serde_json::json!({ "ok": true }));
                 }
-                println!("конфликт {id} решён");
+                println!("conflict {id} resolved");
                 Ok(())
             })
             .await;
@@ -492,7 +478,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             name,
             use_wait,
         } => {
-            std::fs::create_dir_all(&dir).with_context(|| format!("папка {}", dir.display()))?;
+            std::fs::create_dir_all(&dir).with_context(|| format!("folder {}", dir.display()))?;
             let mut cfg = Config::load(&dir).unwrap_or_default();
             cfg.server = server.trim_end_matches('/').to_owned();
             cfg.token = token;
@@ -502,7 +488,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             }
             cfg.save(&dir)?;
             println!(
-                "папка {} подключена к {}; синк: selfsync-cli run --dir {}",
+                "folder {} connected to {}; sync with: selfsync-cli run --dir {}",
                 dir.display(),
                 cfg.server,
                 dir.display()
@@ -519,13 +505,13 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             let (server, code, secret, check) = match link {
                 Some(l) => {
                     let l = handoff::parse_link(&l).context(
-                        "ссылка не разобрана: нужна https://…/join/<код> или obsidian://selfsync-connect?…",
+                        "invalid link; expected https://.../join/<code> or obsidian://selfsync-connect?...",
                     )?;
                     (l.server, l.code, l.secret, l.check)
                 }
                 None => (
-                    server.context("нужен --server")?,
-                    code.context("нужен --code")?,
+                    server.context("--server is required")?,
+                    code.context("--code is required")?,
                     None,
                     None,
                 ),
@@ -561,20 +547,18 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     cfg.device_name = device_name;
                     cfg.use_wait = use_wait;
                     cfg.save(&dir)?;
-                    println!("подключено к vault «{vault}» как «{}»", cfg.device_name);
+                    println!("connected to vault {vault} as {}", cfg.device_name);
                     if commit.is_none() && check.is_some() {
                         // QR обещал обмен, а сервер обязательства не прислал: ключ так
                         // или иначе не примется — нейтрально, без догадок.
                         eprintln!(
-                            "обмен ключом недоступен: введите пароль при run. Если на \
-                             устройстве с кодом обмен не отменяли — возможна подмена"
+                            "key handoff unavailable; enter the password during run. If the source device did not cancel, this may indicate tampering."
                         );
                     }
                     if let Some(commit) = commit {
                         if no_handoff || !handoff::interactive() {
                             eprintln!(
-                                "устройство с кодом готово передать ключ шифрования, но обмен \
-                                 выключен или нет терминала: пароль понадобится при run"
+                                "source device can transfer the encryption key, but handoff is disabled or no terminal is available; enter the password during run"
                             );
                         } else {
                             let mut sess = Session::new(
@@ -596,13 +580,13 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                             .await?;
                             match got {
                                 handoff::Exchange::Done => {
-                                    println!("ключ шифрования сохранён в {STATE_DIR}/key");
+                                    println!("encryption key saved in {STATE_DIR}/key");
                                 }
                                 handoff::Exchange::Refused => {
-                                    eprintln!("ключ не получен: пароль понадобится при run");
+                                    eprintln!("key not received; enter the password during run");
                                 }
                                 handoff::Exchange::Interrupted => {
-                                    eprintln!("прервано: пароль понадобится при run");
+                                    eprintln!("interrupted; enter the password during run");
                                     // Чтение ответа в отдельном потоке не прервать —
                                     // выйти, не дожидаясь его.
                                     std::process::exit(130);
@@ -614,10 +598,12 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 UiResult::Error {
                     code, retry_after, ..
                 } if code == "rate_limited" => anyhow::bail!(
-                    "слишком много неверных кодов с этого адреса, подождите {retry_after} с"
+                    "too many incorrect codes from this address; wait {retry_after} s"
                 ),
-                UiResult::Error { message, .. } => anyhow::bail!("сервер отказал: {message}"),
-                other => anyhow::bail!("неожиданный ответ: {other:?}"),
+                UiResult::Error { message, .. } => {
+                    anyhow::bail!("server refused request: {message}")
+                }
+                other => anyhow::bail!("unexpected response: {other:?}"),
             }
         }
         Cmd::Join {
@@ -655,16 +641,14 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     secret,
                     check,
                 } => (code, url, expires_at, secret, check),
-                UiResult::Error { message, .. } => anyhow::bail!("сервер отказал: {message}"),
-                other => anyhow::bail!("неожиданный ответ: {other:?}"),
+                UiResult::Error { message, .. } => {
+                    anyhow::bail!("server refused request: {message}")
+                }
+                other => anyhow::bail!("unexpected response: {other:?}"),
             };
             println!(
-                "Ссылка подключения «{name}»{} (одноразовая, до {}):",
-                if read_only {
-                    " только для чтения"
-                } else {
-                    ""
-                },
+                "Connect {name}{} (one use, expires {}):",
+                if read_only { " read-only" } else { "" },
                 fmt_time(expires_at)
             );
             println!("{url}\n");
@@ -674,9 +658,9 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 _ => url.clone(),
             };
             print!("{}", handoff::render_qr(&qr)?);
-            println!("\nКод для ручного ввода: {code}");
+            println!("\nManual connection code: {code}");
             println!(
-                "Другая папка: selfsync-cli connect --server {} --code {code}",
+                "Another folder: selfsync-cli connect --server {} --code {code}",
                 cfg.server
             );
             if secret.is_some() {
@@ -697,8 +681,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 }
             } else if want {
                 eprintln!(
-                    "ключ шифрования по коду не передаётся (vault не зашифрован, ключа здесь \
-                     нет — --password-file — или сервер старее 0.5.0)"
+                    "key handoff unavailable: vault is unencrypted, no key is available here (--password-file), or server is older than 0.5.0"
                 );
             }
         }
@@ -716,7 +699,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 Some(command) if !command.trim().is_empty() => {
                     let timeout = match exec_timeout.or_else(|| cfg.exec_timeout.clone()) {
                         Some(t) => humantime::parse_duration(t.trim())
-                            .with_context(|| format!("неверный таймаут хука: {t}"))?,
+                            .with_context(|| format!("invalid hook timeout: {t}"))?,
                         None => selfsync_cli::hook::DEFAULT_TIMEOUT,
                     };
                     Some(selfsync_cli::hook::HookConfig { command, timeout })
@@ -742,7 +725,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 RecoveryCmd::Remove { password_file } => (password_file, false),
             };
             let password = read_password(password_file)?
-                .context("нужен пароль: --password-file или SELFSYNC_PASSWORD")?;
+                .context("password required: --password-file or SELFSYNC_PASSWORD")?;
             let cmd = if create {
                 UiCommand::CreateRecovery {
                     password: password.clone(),
@@ -755,7 +738,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             // Пароль нужен и синку перед командой, если ключ ещё не запомнен.
             let cfg = Config::load(&dir)?;
             if create {
-                warn_old_devices(&dir, &cfg, RECOVERY_MIN, "запись ключа с фразой").await;
+                warn_old_devices(&dir, &cfg, RECOVERY_MIN, "key record with recovery phrase").await;
             }
             let (o, r) =
                 runner::with_vault(&dir, &cfg, Some(password), true, VaultCommand::Ui(cmd)).await?;
@@ -763,20 +746,19 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 Some(UiResult::RecoveryPhrase { words }) => {
                     runner::print_phrase(&words);
                     eprintln!(
-                        "Запись ключа теперь формата 2: устройствам нужен плагин или CLI с \
-                         поддержкой фразы восстановления."
+                        "Key record now uses format 2; devices need a plugin or CLI supporting recovery phrases."
                     );
                     Ok(outcome(o))
                 }
                 Some(UiResult::Ok) => {
-                    println!("фраза восстановления удалена");
+                    println!("recovery phrase removed");
                     Ok(outcome(o))
                 }
                 Some(UiResult::Error { message, .. }) => {
-                    eprintln!("ошибка: {message}");
+                    eprintln!("error: {message}");
                     Ok(ExitCode::from(1))
                 }
-                Some(other) => anyhow::bail!("неожиданный ответ: {other:?}"),
+                Some(other) => anyhow::bail!("unexpected response: {other:?}"),
                 None => Ok(outcome(o)),
             };
         }
@@ -786,13 +768,13 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             no_remember,
         } => {
             let cfg = Config::load(&dir)?;
-            let phrase = read_secret(phrase_file, "фраза восстановления (24 слова)")?;
+            let phrase = read_secret(phrase_file, "recovery phrase (24 words)")?;
             // Проверка до сети: номер неверного слова сразу.
             if let Err(e) = selfsync_core::crypto::RecoveryEntropy::from_phrase(&phrase) {
-                anyhow::bail!("фраза: {e}");
+                anyhow::bail!("phrase: {e}");
             }
-            let new_password = read_secret(new_password_file, "новый пароль")?;
-            anyhow::ensure!(!new_password.is_empty(), "пустой пароль");
+            let new_password = read_secret(new_password_file, "new password")?;
+            anyhow::ensure!(!new_password.is_empty(), "empty password");
             let r = runner::folder_command(
                 &dir,
                 &cfg,
@@ -804,10 +786,10 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             )
             .await?;
             if let UiResult::Error { message, .. } = r {
-                eprintln!("ошибка: {message}");
+                eprintln!("error: {message}");
                 return Ok(ExitCode::from(1));
             }
-            eprintln!("доступ восстановлен, пароль заменён; синхронизация…");
+            eprintln!("access recovered and password replaced; syncing...");
             let opts = Options {
                 once: true,
                 watch: false,
@@ -827,9 +809,9 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
         } => {
             let cfg = Config::load(&dir)?;
             let password = read_password(password_file)?
-                .context("нужен пароль: --password-file или SELFSYNC_PASSWORD")?;
+                .context("password required: --password-file or SELFSYNC_PASSWORD")?;
             if recovery {
-                warn_old_devices(&dir, &cfg, RECOVERY_MIN, "запись ключа с фразой").await;
+                warn_old_devices(&dir, &cfg, RECOVERY_MIN, "key record with recovery phrase").await;
             }
             let opts = Options {
                 once: true,
@@ -844,15 +826,15 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             };
             let code = outcome(runner::run(&dir, &cfg, opts).await?);
             if code == ExitCode::SUCCESS {
-                println!("шифрование включено; на других устройствах понадобится этот пароль");
+                println!("encryption enabled; other devices will need this password");
             }
             return Ok(code);
         }
         Cmd::Rekey { password_file } => {
             let password = read_password(password_file)?
-                .context("нужен пароль: --password-file или SELFSYNC_PASSWORD")?;
+                .context("password required: --password-file or SELFSYNC_PASSWORD")?;
             let cfg = Config::load(&dir)?;
-            warn_old_devices(&dir, &cfg, REKEY_MIN, "смену ключа").await;
+            warn_old_devices(&dir, &cfg, REKEY_MIN, "key rotation").await;
             let cmd = UiCommand::Rekey {
                 password: password.clone(),
                 remember: true,
@@ -861,15 +843,15 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 runner::with_vault(&dir, &cfg, Some(password), true, VaultCommand::Ui(cmd)).await?;
             return match r {
                 Some(UiResult::Ok) if o == Outcome::Synced => {
-                    println!("ключ шифрования сменён; на других устройствах понадобится пароль");
+                    println!("encryption key rotated; other devices will need the password");
                     Ok(outcome(o))
                 }
                 Some(UiResult::Ok) => {
-                    eprintln!("перешифровка не закончена — она продолжится при следующем `run`");
+                    eprintln!("re-encryption is incomplete; the next `run` will resume it");
                     Ok(outcome(o))
                 }
                 Some(UiResult::Error { message, .. }) => {
-                    eprintln!("ошибка: {message}");
+                    eprintln!("error: {message}");
                     Ok(ExitCode::from(1))
                 }
                 _ => Ok(outcome(o)),
@@ -879,7 +861,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             let cfg = Config::load(&dir)?;
             let r = runner::folder_command(&dir, &cfg, UiCommand::Diagnose).await?;
             let UiResult::Diagnosis { checks } = r else {
-                anyhow::bail!("неожиданный ответ: {r:?}");
+                anyhow::bail!("unexpected response: {r:?}");
             };
             let mut failed = false;
             for c in &checks {
@@ -900,7 +882,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
         }
         Cmd::Status => {
             let cfg = Config::load(&dir)?;
-            println!("сервер:     {}", cfg.server);
+            println!("server:     {}", cfg.server);
             println!(
                 "vault:      {}",
                 if cfg.vault.is_empty() {
@@ -909,13 +891,12 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     &cfg.vault
                 }
             );
-            println!("устройство: {}", cfg.device_name);
+            println!("device:     {}", cfg.device_name);
             if dir.join(".git").exists()
                 && !selfsync_core::exclude::Excludes::new(&cfg.excludes).is_excluded(".git/HEAD")
             {
                 println!(
-                    "внимание:   .git не исключён — репозиторий уйдёт на все устройства; \
-                     добавьте \".git/\" в excludes в {}",
+                    "warning:    .git is not excluded; the repository will sync to all devices; add .git/ to excludes in {}",
                     Config::path(&dir).display()
                 );
             }
@@ -929,37 +910,37 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                         .values()
                         .filter(|f| !f.folder && f.local.is_some())
                         .count();
-                    println!("файлов:     {files}");
-                    println!("к отправке: {}", idx.pending_count());
+                    println!("files:      {files}");
+                    println!("pending:    {}", idx.pending_count());
                     println!(
-                        "шифрование: {}",
+                        "encryption: {}",
                         if matches!(idx.mode, selfsync_core::index::VaultMode::Plain) {
-                            "нет"
+                            "none"
                         } else {
                             "да"
                         }
                     );
-                    println!("курсор:     {}", idx.last_seq);
+                    println!("cursor:     {}", idx.last_seq);
                     if dir.join(STATE_DIR).join(runner::READ_ONLY_MARKER).exists() {
-                        println!("режим:      только чтение (локальные правки не отправляются)");
+                        println!("mode:       read-only (local edits are not uploaded)");
                     }
                     if let Some(s) = std::fs::read(dir.join(STATE_DIR).join(runner::SERVER_MARKER))
                         .ok()
                         .and_then(|b| serde_json::from_slice::<runner::ServerState>(&b).ok())
                     {
                         if s.storage != StorageHealth::default() {
-                            println!("хранилище:  {}", storage_line(&s.storage));
+                            println!("storage:    {}", storage_line(&s.storage));
                         }
                         if let Some(q) = quota_line(&s.quota) {
-                            println!("место:      {q}");
+                            println!("quota:      {q}");
                         }
                     }
                     for c in &idx.conflicts {
-                        println!("конфликт:   {} → копия {}", c.path, c.copy);
+                        println!("conflict:   {} -> copy {}", c.path, c.copy);
                     }
                 }
-                Some(Err(e)) => println!("индекс:     повреждён ({e})"),
-                None => println!("индекс:     ещё не синхронизировалось"),
+                Some(Err(e)) => println!("index:      damaged ({e})"),
+                None => println!("index:      not synced yet"),
             }
         }
     }
@@ -968,20 +949,20 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
 
 #[derive(Subcommand)]
 enum RecoveryCmd {
-    /// Создать фразу (или новую вместо прежней: та перестанет работать).
+    /// Create a recovery phrase, replacing and invalidating any previous phrase.
     Create {
-        /// Файл с паролем (или переменная SELFSYNC_PASSWORD).
+        /// Password file (or SELFSYNC_PASSWORD).
         #[arg(long)]
         password_file: Option<PathBuf>,
     },
-    /// Удалить фразу восстановления.
+    /// Remove the recovery phrase.
     Remove {
         #[arg(long)]
         password_file: Option<PathBuf>,
     },
 }
 
-/// Секрет из файла или с терминала (без эха).
+/// Read a secret from a file or terminal without echo.
 fn read_secret(file: Option<PathBuf>, prompt: &str) -> anyhow::Result<String> {
     if let Some(p) = file {
         return Ok(std::fs::read_to_string(&p)
@@ -993,7 +974,7 @@ fn read_secret(file: Option<PathBuf>, prompt: &str) -> anyhow::Result<String> {
     let stdin = std::io::stdin();
     anyhow::ensure!(
         stdin.is_terminal(),
-        "нет терминала: передайте файл ({prompt})"
+        "no terminal; provide a file ({prompt})"
     );
     eprint!("{prompt}: ");
     std::io::stderr().flush()?;
@@ -1004,7 +985,7 @@ fn read_secret(file: Option<PathBuf>, prompt: &str) -> anyhow::Result<String> {
     Ok(line.trim().to_owned())
 }
 
-/// Выключенное эхо терминала на время ввода секрета.
+/// Disable terminal echo while reading a secret.
 struct EchoOff(#[cfg(unix)] Option<libc::termios>);
 
 impl EchoOff {
@@ -1040,16 +1021,16 @@ impl Drop for EchoOff {
     }
 }
 
-/// Общее у команд корзины и истории.
+/// Shared arguments for history and trash commands.
 #[derive(Args)]
 struct VaultArgs {
-    /// Ответ в JSON (для скриптов).
+    /// Print JSON for scripts.
     #[arg(long)]
     json: bool,
-    /// Файл с паролем шифрования (или переменная SELFSYNC_PASSWORD).
+    /// Encryption password file (or SELFSYNC_PASSWORD).
     #[arg(long)]
     password_file: Option<PathBuf>,
-    /// Не запоминать ключ в .selfsync/key.
+    /// Do not remember the key in .selfsync/key.
     #[arg(long)]
     no_remember: bool,
 }
@@ -1061,8 +1042,7 @@ enum Keep {
     Server,
 }
 
-/// Путь внутри папки: относительный как есть, `./` и абсолютный внутри папки —
-/// приводятся к пути vault'а.
+/// Normalize a relative or absolute in-folder path to a vault path.
 fn vault_path(dir: &std::path::Path, p: &str) -> String {
     let path = std::path::Path::new(p);
     let rel = if path.is_absolute() {
@@ -1080,92 +1060,87 @@ fn vault_path(dir: &std::path::Path, p: &str) -> String {
 
 fn diag_step(step: &str) -> &str {
     match step {
-        "server" => "сервер",
-        "proxy" => "прокси",
-        "version" => "версия",
-        "clock" => "часы",
-        "token" => "токен",
-        "body" => "большие запросы",
+        "server" => "server",
+        "proxy" => "proxy",
+        "version" => "version",
+        "clock" => "clock",
+        "token" => "token",
+        "body" => "large requests",
         "longpoll" => "long-poll",
         other => other,
     }
 }
 
-/// Итог шага проверки соединения: что не так и что сделать.
+/// Explain a connection-check result and remediation.
 fn diag_text(c: &DiagCheck) -> String {
     let d = &c.detail;
     match (c.step.as_str(), c.code.as_str()) {
-        ("server", "ok") => format!("отвечает, selfsync {d}"),
-        (_, "tls") => "сертификат не принят: самоподписанный, истёк или выписан на другое \
-                       имя. Нужен сертификат доверенного центра (Let's Encrypt) на этот адрес"
+        ("server", "ok") => format!("responding, selfsync {d}"),
+        (_, "tls") => "certificate rejected: self-signed, expired or issued for another hostname; use a trusted certificate such as Let's Encrypt for this address"
             .into(),
-        (_, "dns") => "имя сервера не найдено — проверьте адрес".into(),
-        (_, "refused") => "соединение отклонено — сервер не запущен или порт закрыт".into(),
+        (_, "dns") => "server name not found; check the address".into(),
+        (_, "refused") => "connection refused; server is stopped or port is closed".into(),
         (_, "timeout") => {
-            "сервер не ответил — адрес недоступен из этой сети или блокируется".into()
+            "server did not respond; address is unreachable or blocked from this network".into()
         }
-        (_, "network") => format!("сеть: {d}"),
+        (_, "network") => format!("network: {d}"),
         (_, "not_selfsync") => {
-            format!("по адресу не selfsync ({d}) — проверьте адрес и путь в прокси")
+            format!("address does not serve selfsync ({d}); check the URL and proxy path")
         }
-        (_, "headers_stripped") => "прокси или CDN убирает заголовок x-selfsync-proto из \
-                                    ответов — без него клиент не узнает версию сервера"
+        (_, "headers_stripped") => "proxy or CDN strips x-selfsync-proto response headers; the client cannot determine the server version"
             .into(),
         (_, "proto_major") => {
-            format!("сервер другой версии протокола ({d}) — обновите клиент или сервер")
+            format!("server uses a different protocol version ({d}); upgrade the client or server")
         }
         (_, "server_old") => {
-            format!("сервер {d} старее клиента — часть возможностей недоступна, обновите его")
+            format!("server {d} is older than the client; some features are unavailable; upgrade the server")
         }
-        ("version", "ok") => format!("совпадает ({d})"),
-        (_, "skew") => format!("часы расходятся с сервером на {d} с — проверьте время"),
-        (_, "no_date") => "сервер не сообщил время".into(),
-        ("token", "ok") => "принят".into(),
-        ("token", "read_only") => "принят, устройство только для чтения".into(),
+        ("version", "ok") => format!("matches ({d})"),
+        (_, "skew") => format!("clock differs from server by {d} s; check system time"),
+        (_, "no_date") => "server did not report its time".into(),
+        ("token", "ok") => "accepted".into(),
+        ("token", "read_only") => "accepted, device is read-only".into(),
         (_, "unauthorized") => {
-            "не принят — устройство отозвано или токен неверный, подключитесь заново".into()
+            "rejected: device revoked or token invalid; connect again".into()
         }
-        (_, "client_old") => "сервер требует более новый клиент — обновите selfsync-cli".into(),
-        (_, "rate_limited") => "сервер временно ограничил попытки — повторите позже".into(),
-        ("body", "ok") => "проходят".into(),
-        (_, "server_limit") => "проходят до лимита файла сервера".into(),
+        (_, "client_old") => "server requires a newer client; upgrade selfsync-cli".into(),
+        (_, "rate_limited") => "server temporarily rate-limited attempts; retry later".into(),
+        ("body", "ok") => "accepted".into(),
+        (_, "server_limit") => "accepted up to the server file-size limit".into(),
         (_, "body_limit") => format!(
-            "прокси не пропускает запросы больше ~1,5 МБ ({d}) — поднимите лимит \
-             (nginx: client_max_body_size 32m)"
+            "proxy rejects requests over about 1.5 MiB ({d}); raise its limit (nginx: client_max_body_size 32m)"
         ),
-        (_, "quota") => "не проверено — место vault'а закончилось".into(),
-        ("body", "read_only") => "не проверяется на устройстве только для чтения".into(),
-        (_, "unexpected") => format!("неожиданный ответ ({d})"),
-        ("longpoll", "ok") => "работает".into(),
-        (_, "off") => "выключен (use_wait = false): изменения приходят по опросу".into(),
-        (_, "changed") => "не проверено — vault изменился во время проверки".into(),
-        (_, "no_longpoll") => "сервер отвечает сразу (CGI или прокси) — выключите use_wait \
-                               в .selfsync/config.toml"
+        (_, "quota") => "not checked: vault storage is full".into(),
+        ("body", "read_only") => "not checked on read-only devices".into(),
+        (_, "unexpected") => format!("unexpected response ({d})"),
+        ("longpoll", "ok") => "working".into(),
+        (_, "off") => "disabled (use_wait = false); changes are discovered by polling".into(),
+        (_, "changed") => "not checked: vault changed during the check".into(),
+        (_, "no_longpoll") => "server replies immediately (CGI or proxy); disable use_wait in .selfsync/config.toml"
             .into(),
         (_, "failed") => format!(
-            "запрос оборвался ({d}) — прокси рвёт долгие запросы: поднимите таймаут \
-             (nginx: proxy_read_timeout 60s) или выключите use_wait"
+            "request interrupted ({d}); proxy closes long requests; raise its timeout (nginx: proxy_read_timeout 60s) or disable use_wait"
         ),
-        ("clock", "ok") | ("proxy", "ok") => "в порядке".into(),
+        ("clock", "ok") | ("proxy", "ok") => "OK".into(),
         (_, code) => format!("{code} {d}"),
     }
 }
 
-/// Строка `status` о квоте vault'а (по последнему синку); `None` — сервер старше 0.4.0.
+/// Format the last synced vault quota for status; None for servers before 0.4.0.
 fn quota_line(q: &QuotaStatus) -> Option<String> {
     if *q == QuotaStatus::default() {
         return None;
     }
-    let mut s = format!("занято {}", fmt_bytes(q.used));
+    let mut s = format!("{} used", fmt_bytes(q.used));
     if q.hard > 0 {
-        s.push_str(&format!(" из {}", fmt_bytes(q.hard)));
+        s.push_str(&format!(" of {}", fmt_bytes(q.hard)));
     }
     if q.soft > 0 {
-        s.push_str(&format!(", предупреждение с {}", fmt_bytes(q.soft)));
+        s.push_str(&format!(", warning threshold {}", fmt_bytes(q.soft)));
     }
     if q.held > 0 {
         s.push_str(&format!(
-            "; места нет — ждут отправки: {} (purge, purge-history)",
+            "; storage full, {} awaiting upload (purge, purge-history)",
             q.held
         ));
     }
@@ -1173,7 +1148,7 @@ fn quota_line(q: &QuotaStatus) -> Option<String> {
 }
 
 fn fmt_bytes(n: u64) -> String {
-    const U: [&str; 5] = ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"];
+    const U: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut v = n as f64;
     let mut i = 0;
     while v >= 1024.0 && i < U.len() - 1 {
@@ -1187,23 +1162,23 @@ fn fmt_bytes(n: u64) -> String {
     }
 }
 
-/// Строка `status` о хранилище на сервере (по последнему синку).
+/// Format the last synced server storage health for status.
 fn storage_line(s: &StorageHealth) -> String {
     let mut parts = Vec::new();
     if s.damaged > 0 {
         parts.push(format!(
-            "повреждено файлов: {}, ждём их с устройств",
+            "{} damaged files, awaiting copies from devices",
             s.damaged
         ));
     }
     if s.server_problem {
-        parts.push("повреждение, которое исправит только админ (selfsync verify)".to_owned());
+        parts.push("damage requiring an administrator (selfsync verify)".to_owned());
     }
     if parts.is_empty() {
-        parts.push("проблем нет".to_owned());
+        parts.push("no problems".to_owned());
     }
     if s.verified_at > 0 {
-        parts.push(format!("проверено {}", fmt_time(s.verified_at)));
+        parts.push(format!("verified {}", fmt_time(s.verified_at)));
     }
     parts.join("; ")
 }
@@ -1228,7 +1203,7 @@ fn print_json<T: serde::Serialize>(v: &T) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Команда на движке папки: печать ответа и код выхода как у `run --once`.
+/// Execute a vault command; print its result and use run --once exit codes.
 async fn vault_command(
     dir: &std::path::Path,
     v: VaultArgs,
@@ -1249,7 +1224,7 @@ async fn vault_command(
             if v.json {
                 print_json(&serde_json::json!({ "error": code, "message": message }))?;
             }
-            eprintln!("ошибка: {message}");
+            eprintln!("error: {message}");
             Ok(ExitCode::from(1))
         }
         Some(r) => {
@@ -1260,8 +1235,7 @@ async fn vault_command(
     }
 }
 
-/// Предупредить об устройствах, которые старее `min` (или версия которых
-/// неизвестна): они не поймут то, что сейчас будет сделано. Без сети — молча.
+/// Warn about devices older than min or of unknown version before an incompatible operation; silent when offline.
 async fn warn_old_devices(dir: &std::path::Path, cfg: &Config, min: &str, what: &str) {
     let Ok(UiResult::Devices { devices, .. }) =
         runner::folder_command(dir, cfg, UiCommand::Devices).await
@@ -1274,7 +1248,7 @@ async fn warn_old_devices(dir: &std::path::Path, cfg: &Config, min: &str, what: 
         .filter(|d| selfsync_core::version::older_than(&d.client, min))
         .map(|d| {
             if d.client.is_empty() {
-                format!("«{}» (версия неизвестна)", d.name)
+                format!("{} (unknown version)", d.name)
             } else {
                 format!("«{}» ({})", d.name, d.client)
             }
@@ -1282,8 +1256,7 @@ async fn warn_old_devices(dir: &std::path::Path, cfg: &Config, min: &str, what: 
         .collect();
     if !old.is_empty() {
         eprintln!(
-            "внимание: {what} не поймут устройства старее {min}: {}. Обновите на них \
-             плагин или selfsync-cli.",
+            "warning: {what} is not supported by devices older than {min}: {}; upgrade their plugin or selfsync-cli",
             old.join(", ")
         );
     }
@@ -1293,7 +1266,7 @@ fn read_password(file: Option<PathBuf>) -> anyhow::Result<Option<String>> {
     Ok(match file {
         Some(p) => Some(
             std::fs::read_to_string(&p)
-                .with_context(|| format!("пароль из {}", p.display()))?
+                .with_context(|| format!("password from {}", p.display()))?
                 .trim_end_matches(['\n', '\r'])
                 .to_owned(),
         ),
@@ -1305,22 +1278,23 @@ fn outcome(o: Outcome) -> ExitCode {
     match o {
         Outcome::Synced | Outcome::Interrupted => ExitCode::SUCCESS,
         Outcome::Failed(r) => {
-            eprintln!("синк не удался: {r}");
+            eprintln!("sync failed: {r}");
             ExitCode::from(1)
         }
         Outcome::NeedPassword => {
-            eprintln!("vault зашифрован: нужен пароль (--password-file или SELFSYNC_PASSWORD)");
+            eprintln!(
+                "vault is encrypted; password required (--password-file or SELFSYNC_PASSWORD)"
+            );
             ExitCode::from(2)
         }
         Outcome::Blocked(r) if r == "mass_delete" => {
             eprintln!(
-                "синк остановлен: в папке не найдено много файлов, которые здесь были; \
-                 удаления не отправлены. Верните файлы или подтвердите: run --allow-deletes"
+                "sync stopped: many previously present files are missing; no deletions were sent. Restore the files or confirm with run --allow-deletes."
             );
             ExitCode::from(3)
         }
         Outcome::Blocked(r) => {
-            eprintln!("синк остановлен: {r}");
+            eprintln!("sync stopped: {r}");
             ExitCode::from(3)
         }
     }

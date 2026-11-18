@@ -90,10 +90,10 @@ export class Runner {
       if (ev.type === "command") this.reply(ev.req, { type: "error", code: "rejected", message: String(e) });
       // Команду с негодными данными ядро отвергает, не ломаясь; прочее — сбой ядра.
       if (ev.type === "command" && !isTrap(e)) {
-        this.hooks.log?.("warn", `ядро отклонило команду: ${String(e)}`);
+        this.hooks.log?.("warn", `sync core rejected command: ${String(e)}`);
         return;
       }
-      this.hooks.log?.("error", `сбой ядра на событии ${ev.type}: ${String(e)}`);
+      this.hooks.log?.("error", `sync core failed on event ${ev.type}: ${String(e)}`);
       this.stop();
       this.hooks.fatal?.(e);
       return;
@@ -200,7 +200,7 @@ export class Runner {
     this.stopped = true;
     if (this.timer !== undefined) window.clearTimeout(this.timer);
     this.timer = undefined;
-    for (const w of this.waiting.values()) w({ type: "error", code: "stopped", message: "синк остановлен" });
+    for (const w of this.waiting.values()) w({ type: "error", code: "stopped", message: "sync stopped" });
     this.waiting.clear();
     try {
       this.engine.free();

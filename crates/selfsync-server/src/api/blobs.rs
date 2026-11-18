@@ -23,7 +23,9 @@ use crate::quota;
 use crate::state::AppState;
 
 fn parse_hash(s: &str) -> ApiResult<Hash> {
-    Hash::from_hex(s).ok_or_else(|| ApiError::bad_request("bad_hash", "хэш — 64 hex-символа"))
+    Hash::from_hex(s).ok_or_else(|| {
+        ApiError::bad_request("bad_hash", "hash must contain 64 hexadecimal characters")
+    })
 }
 
 fn content_length(h: &HeaderMap) -> Option<u64> {
@@ -35,7 +37,7 @@ pub async fn missing(
     Proto(req): Proto<pb::HashList>,
 ) -> ApiResult<Proto<pb::HashList>> {
     if req.hashes.len() > 10_000 {
-        return Err(ApiError::too_large("не больше 10000 хэшей за запрос"));
+        return Err(ApiError::too_large("at most 10000 hashes per request"));
     }
     let store = a.vault.blobs.clone();
     let hashes = tokio::task::spawn_blocking(move || {
@@ -76,7 +78,7 @@ async fn settle_wanted(a: &AuthCtx, h: Hash) -> ApiResult<()> {
         .db(move |c, _| Ok(crate::db::vault::unwant_blob(c, &h)?))
         .await?
     {
-        tracing::info!(blob = %h.to_hex(), device = a.device_id, "запрошенный блоб залит устройством");
+        tracing::info!(blob = %h.to_hex(), device = a.device_id, "requested blob uploaded by device");
     }
     Ok(())
 }
@@ -84,7 +86,7 @@ async fn settle_wanted(a: &AuthCtx, h: Hash) -> ApiResult<()> {
 fn stream_error(e: StreamError) -> ApiError {
     match e {
         StreamError::Io(e) => ApiError::internal(e),
-        StreamError::Body => ApiError::bad_request("body_aborted", "тело запроса оборвалось"),
+        StreamError::Body => ApiError::bad_request("body_aborted", "request body was interrupted"),
     }
 }
 
@@ -103,9 +105,7 @@ pub async fn put_blob(
     }
     let declared = content_length(req.headers());
     if declared.is_some_and(|n| n > limit) {
-        return Err(ApiError::too_large(
-            "больше 8 МиБ — используйте /v1/uploads",
-        ));
+        return Err(ApiError::too_large("use /v1/uploads for files over 8 MiB"));
     }
     // Без Content-Length размер узнаём по ходу записи: квота и лимит файла — её предел.
     let room = quota::check_new_blob(&st, &a.vault, h, declared.unwrap_or(0)).await?;
@@ -132,16 +132,14 @@ pub async fn put_blob(
         }
         WriteOutcome::HashMismatch { received } => Err(ApiError::bad_request(
             "hash_mismatch",
-            "содержимое не совпадает с хэшем",
+            "content does not match hash",
         )
         .log_detail(format!("received={received}"))),
         WriteOutcome::TooLarge if room.quota < file_limit => Err(quota::vault_full()),
         WriteOutcome::TooLarge if file_limit < limit => {
-            Err(ApiError::too_large("файл больше лимита vault'а"))
+            Err(ApiError::too_large("file exceeds the vault size limit"))
         }
-        WriteOutcome::TooLarge => Err(ApiError::too_large(
-            "больше 8 МиБ — используйте /v1/uploads",
-        )),
+        WriteOutcome::TooLarge => Err(ApiError::too_large("use /v1/uploads for files over 8 MiB")),
     }
 }
 
@@ -213,7 +211,7 @@ pub async fn get_blob(
             let mut r = ApiError::new(
                 StatusCode::RANGE_NOT_SATISFIABLE,
                 "bad_range",
-                "неверный Range",
+                "invalid Range",
             )
             .into_response();
             r.headers_mut().insert(
@@ -281,9 +279,9 @@ pub async fn upload_start(
     Proto(req): Proto<pb::UploadStart>,
 ) -> ApiResult<Proto<pb::UploadState>> {
     let h = Hash::from_slice(&req.hash)
-        .ok_or_else(|| ApiError::bad_request("bad_hash", "хэш должен быть 32 байта"))?;
+        .ok_or_else(|| ApiError::bad_request("bad_hash", "hash must be 32 bytes"))?;
     if req.size > st.config.max_blob_size {
-        return Err(ApiError::too_large("файл больше лимита сервера"));
+        return Err(ApiError::too_large("file exceeds the server size limit"));
     }
     if a.vault.blobs.exists(&h) {
         settle_wanted(&a, h).await?;
@@ -360,7 +358,7 @@ async fn load_upload(a: &AuthCtx, id: &str) -> ApiResult<(Hash, u64)> {
         })
         .await?;
     let (h, size) = row.ok_or_else(|| ApiError::not_found("upload_not_found"))?;
-    let h = Hash::from_slice(&h).ok_or_else(|| ApiError::internal("битый хэш загрузки"))?;
+    let h = Hash::from_slice(&h).ok_or_else(|| ApiError::internal("invalid upload hash"))?;
     Ok((h, u(size)))
 }
 
@@ -400,17 +398,20 @@ pub async fn upload_part(
 ) -> ApiResult<Proto<pb::UploadState>> {
     let (_, size) = load_upload(&a, &id).await?;
     let (start, end, total) = parse_content_range(req.headers()).ok_or_else(|| {
-        ApiError::bad_request("bad_content_range", "нужен Content-Range: bytes a-b/total")
+        ApiError::bad_request(
+            "bad_content_range",
+            "Content-Range required: bytes a-b/total",
+        )
     })?;
     if total != size || end < start || end >= size {
         return Err(ApiError::bad_request(
             "bad_content_range",
-            "диапазон не соответствует загрузке",
+            "range does not match upload",
         ));
     }
     let part_len = end - start + 1;
     if part_len > st.config.max_body_size {
-        return Err(ApiError::too_large("часть больше SELFSYNC_MAX_BODY_SIZE"));
+        return Err(ApiError::too_large("part exceeds SELFSYNC_MAX_BODY_SIZE"));
     }
     let body = req.into_body().into_data_stream();
     let outcome = a
@@ -440,14 +441,12 @@ pub async fn upload_part(
         }
         AppendOutcome::OffsetMismatch { current } => Err(ApiError::conflict(
             "offset_mismatch",
-            format!("текущее смещение {current}"),
+            format!("current offset is {current}"),
         )),
-        AppendOutcome::TooLarge { .. } => {
-            Err(ApiError::too_large("часть выходит за размер загрузки"))
-        }
+        AppendOutcome::TooLarge { .. } => Err(ApiError::too_large("part exceeds upload size")),
         AppendOutcome::Busy => Err(ApiError::conflict(
             "upload_busy",
-            "загрузка уже пишется другим запросом",
+            "another request is already writing this upload",
         )),
     }
 }
@@ -484,14 +483,14 @@ pub async fn upload_commit(
     if len != size {
         return Err(ApiError::conflict(
             "upload_incomplete",
-            format!("принято {len} из {size} байт"),
+            format!("received {len} of {size} bytes"),
         ));
     }
     if actual != h {
         let _ = tokio::fs::remove_file(&path).await;
         remove_row(&a, id).await?;
         return Err(
-            ApiError::bad_request("hash_mismatch", "содержимое не совпадает с хэшем")
+            ApiError::bad_request("hash_mismatch", "content does not match hash")
                 .log_detail(format!("received={len}")),
         );
     }

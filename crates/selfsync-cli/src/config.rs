@@ -71,11 +71,11 @@ impl Config {
         let p = Self::path(dir);
         let text = std::fs::read_to_string(&p).with_context(|| {
             format!(
-                "нет настроек {}: сначала selfsync-cli init или connect",
+                "no configuration at {}; run selfsync-cli init or connect first",
                 p.display()
             )
         })?;
-        toml::from_str(&text).with_context(|| format!("{} не разбирается", p.display()))
+        toml::from_str(&text).with_context(|| format!("cannot parse {}", p.display()))
     }
 
     /// Сохранить (токен внутри — только владельцу).
@@ -114,8 +114,21 @@ impl Config {
 pub fn write_private(path: &Path, data: &[u8]) -> anyhow::Result<()> {
     use std::io::Write;
     let tmp = path.with_extension("tmp");
+    match std::fs::symlink_metadata(&tmp) {
+        Ok(md) => {
+            anyhow::ensure!(md.is_file(), "unsafe private temporary file");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                anyhow::ensure!(md.nlink() == 1, "unsafe private temporary hard link");
+            }
+            std::fs::remove_file(&tmp)?;
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -123,7 +136,7 @@ pub fn write_private(path: &Path, data: &[u8]) -> anyhow::Result<()> {
     }
     let mut f = opts
         .open(&tmp)
-        .with_context(|| format!("запись {}", tmp.display()))?;
+        .with_context(|| format!("writing {}", tmp.display()))?;
     f.write_all(data)?;
     f.sync_all()?;
     std::fs::rename(&tmp, path)?;

@@ -233,7 +233,7 @@ export class AdapterBackend implements FileBackend {
     for (const name of asideNames(path)) {
       if (!(await this.a.exists(name))) return name;
     }
-    throw new Error(`${path}: нет свободного временного имени`);
+    throw new Error(`${path}: no available temporary filename`);
   }
 
   /** Переименование с заменой существующего (два шага, не атомарно). */
@@ -296,7 +296,7 @@ export class AdapterBackend implements FileBackend {
       await this.a.appendBinary(f, buffer(data));
       return;
     }
-    if (size < offset) throw new Error(`разрыв во временном файле ${name}: ${size} < ${offset}`);
+    if (size < offset) throw new Error(`gap in temporary file ${name}: ${size} < ${offset}`);
     // Хвост после смещения (повтор части после сбоя) или старый Obsidian без
     // appendBinary — переписать файл целиком.
     const head = new Uint8Array(await this.a.readBinary(f)).subarray(0, offset);

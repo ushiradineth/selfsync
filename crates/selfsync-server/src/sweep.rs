@@ -76,14 +76,14 @@ pub fn spawn_after_first_request(st: &AppState) {
         let res = tokio::task::spawn_blocking(move || {
             let now = now_ms();
             if let Err(e) = sweep_throttle(&config, now) {
-                tracing::warn!(error = %e, "уборка счётчиков лимитера не удалась");
+                tracing::warn!(error = %e, "could not clean up rate-limit counters");
             }
             let mut done = Vec::new();
             for name in list_vault_dirs(&config) {
                 if due(&config, &name, now) {
                     match sweep_vault(&config, &name, now) {
                         Ok(r) => done.push((name, r)),
-                        Err(e) => tracing::warn!(vault = %name, error = %e, "sweep не удался"),
+                        Err(e) => tracing::warn!(vault = %name, error = %e, "sweep failed"),
                     }
                 }
             }

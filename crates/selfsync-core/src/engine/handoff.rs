@@ -153,7 +153,7 @@ pub(crate) async fn source_step(
     let Some(mut h) = cx.with(|s| s.handoffs.get(&code).cloned()) else {
         return fail(
             "no_handoff",
-            "обмен ключом по этому коду не начат или закончен",
+            "key handoff for this code has not started or has finished",
         );
     };
     let res = match source_advance(cx, &code, &mut h, confirm).await {
@@ -164,7 +164,7 @@ pub(crate) async fn source_step(
         }
         Err(e) if gone(&e) => fail(
             "handoff_gone",
-            "обмен прерван на новом устройстве или истёк",
+            "key handoff was cancelled by the new device or expired",
         ),
         r => r,
     };
@@ -225,16 +225,13 @@ async fn source_advance(
     // Сервер пишет ключ один раз; другой ключ при следующем опросе — подмена.
     match &h.joiner_pk {
         Some(b) if *b != st.pk => {
-            cx.log(
-                LogLevel::Warn,
-                "ключ нового устройства сменился — обмен прерван",
-            );
+            cx.log(LogLevel::Warn, "new device key changed; handoff aborted");
             return Ok(result(HandoffStep::Rejected, st.name, None, false));
         }
         Some(_) => {}
         None => {
             if !handoff::valid_public(&st.pk) {
-                return fail("bad_handoff_key", "неверный ключ нового устройства");
+                return fail("bad_handoff_key", "invalid new device key");
             }
             h.joiner_pk = Some(st.pk.clone());
         }
@@ -251,7 +248,7 @@ async fn source_advance(
     if qr && !handoff::check_mac(&h.link_secret, &st.pk, &st.mac) {
         cx.log(
             LogLevel::Warn,
-            "ключ нового устройства не совпал с QR-кодом — обмен прерван",
+            "new device key does not match QR code; handoff aborted",
         );
         return Ok(result(HandoffStep::Rejected, st.name, None, false));
     }
@@ -270,18 +267,18 @@ async fn send_wrap(
     joiner: &[u8],
 ) -> SyncResult<UiResult> {
     let Some(master) = cx.with(|s| s.master.clone()) else {
-        return fail("no_key", "ключ шифрования на этом устройстве не раскрыт");
+        return fail("no_key", "encryption key is locked on this device");
     };
     let wrapped = handoff::wrap(&Labels::selfsync(), &h.eph, joiner, master.as_bytes())
         .map_err(|e| SyncError::Io(e.to_string()))?;
     h.wrap_sent = true;
     let done = api::handoff_source(cx, code.to_owned(), vec![], wrapped).await?;
     if !done.delivered {
-        return fail("handoff_not_delivered", "сервер не принял обёртку ключа");
+        return fail("handoff_not_delivered", "server rejected the wrapped key");
     }
     cx.log(
         LogLevel::Info,
-        format!("ключ шифрования передан устройству «{}»", done.name),
+        format!("encryption key transferred to device {}", done.name),
     );
     Ok(result(HandoffStep::Done, done.name, None, h.qr))
 }
@@ -311,7 +308,7 @@ pub(crate) async fn receive_start(
     check: Option<String>,
 ) -> SyncResult<UiResult> {
     if commit.len() != 32 {
-        return fail("bad_commit", "обязательство источника — 32 байта");
+        return fail("bad_commit", "source commitment must be 32 bytes");
     }
     let nonempty = |v: Option<String>| v.map(|x| x.trim().to_owned()).filter(|x| !x.is_empty());
     let by_qr = match nonempty(check) {
@@ -325,7 +322,7 @@ pub(crate) async fn receive_start(
                 let _ = api::handoff_joiner_delete(cx).await;
                 return fail(
                     "handoff_commit_mismatch",
-                    "обязательство источника не совпало с QR-кодом — возможна подмена, обмен прерван",
+                    "source commitment does not match QR code; possible tampering, handoff aborted",
                 );
             }
             true
@@ -359,13 +356,13 @@ pub(crate) async fn receive_start(
 /// эти цифры); `done` — ключ раскрыт и запомнен, обмен на сервере закрыт.
 pub(crate) async fn receive_poll(cx: &Ctx, confirm: Option<String>) -> SyncResult<UiResult> {
     let Some(mut h) = cx.with(|s| s.receiving.clone()) else {
-        return fail("no_handoff", "обмен ключом не начат");
+        return fail("no_handoff", "key handoff has not started");
     };
     let res = match receive_advance(cx, &mut h, confirm).await {
         Err(e) if transient(&e) => Ok(offline(h.sas.clone(), String::new(), h.by_qr)),
         Err(e) if gone(&e) => fail(
             "handoff_gone",
-            "обмен отменён на устройстве с кодом или истёк — введите пароль",
+            "key handoff cancelled on source device or expired; enter the password",
         ),
         r => r,
     };
@@ -408,7 +405,7 @@ async fn receive_advance(
     if !handoff::check_commit(&st.pk, &h.commit) {
         return fail(
             "handoff_commit_mismatch",
-            "ключ источника не совпал с обязательством — возможна подмена, обмен прерван",
+            "source key does not match commitment; possible tampering, handoff aborted",
         );
     }
     let sas = handoff::sas_digits(&labels, &st.pk, h.eph.public());
@@ -425,18 +422,21 @@ async fn receive_advance(
         ));
     }
     let key = handoff::unwrap(&labels, &h.eph, &st.pk, &st.wrapped)
-        .map_err(|_| SyncError::Corrupt("обёртка ключа не открывается".into()))?;
+        .map_err(|_| SyncError::Corrupt("cannot decrypt wrapped key".into()))?;
     let Ok(key) = <[u8; 32]>::try_from(key.as_slice()) else {
-        return fail("bad_handoff_key", "в обёртке не ключ vault'а");
+        return fail("bad_handoff_key", "wrapped data is not a vault key");
     };
     let master = MasterKey::from_bytes(key);
     // Ключ пришёл через сервер: принять его, только если он открывает vault.
     let vk = api::get_vault_key(cx).await?;
     if vk.record.is_empty() {
-        return fail("no_vault_key", "vault не зашифрован");
+        return fail("no_vault_key", "vault is not encrypted");
     }
     if !crypto::verify_master(&vk.record, &master).unwrap_or(false) {
-        return fail("handoff_wrong_key", "переданный ключ не подходит к vault'у");
+        return fail(
+            "handoff_wrong_key",
+            "transferred key does not match the vault",
+        );
     }
     let epoch = crypto::record_epoch(&vk.record).unwrap_or(1);
     cx.with_mut(|s| {
@@ -447,7 +447,7 @@ async fn receive_advance(
     set_master(cx, master, true, true, epoch);
     cx.log(
         LogLevel::Info,
-        "ключ шифрования получен от другого устройства",
+        "encryption key received from another device",
     );
     Ok(result(HandoffStep::Done, String::new(), Some(sas), h.by_qr))
 }

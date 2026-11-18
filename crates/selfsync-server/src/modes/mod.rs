@@ -37,12 +37,12 @@ impl AnyListener {
 pub async fn bind(spec: &str) -> anyhow::Result<AnyListener> {
     if let Some(path) = spec.strip_prefix("unix:") {
         let _ = std::fs::remove_file(path);
-        let l = UnixListener::bind(path).with_context(|| format!("не удалось слушать {spec}"))?;
+        let l = UnixListener::bind(path).with_context(|| format!("cannot listen on {spec}"))?;
         Ok(AnyListener::Unix(l))
     } else {
         let l = TcpListener::bind(spec)
             .await
-            .with_context(|| format!("не удалось слушать {spec}"))?;
+            .with_context(|| format!("cannot listen on {spec}"))?;
         Ok(AnyListener::Tcp(l))
     }
 }
@@ -52,9 +52,7 @@ pub fn from_systemd() -> anyhow::Result<AnyListener> {
     let mut fds = listenfd::ListenFd::from_env();
     if fds.len() == 0 {
         bail!(
-            "systemd не передал сокет. Запускайте через systemd socket unit \
-             (deploy/systemd/selfsync.socket) или для проверки: \
-             systemd-socket-activate -l 8085 selfsync socket"
+            "systemd did not pass a socket; start via deploy/systemd/selfsync.socket or test with: systemd-socket-activate -l 8085 selfsync socket"
         );
     }
     if let Ok(Some(l)) = fds.take_tcp_listener(0) {
@@ -65,7 +63,7 @@ pub fn from_systemd() -> anyhow::Result<AnyListener> {
         l.set_nonblocking(true)?;
         return Ok(AnyListener::Unix(UnixListener::from_std(l)?));
     }
-    bail!("переданный systemd дескриптор — не слушающий TCP- или Unix-сокет")
+    bail!("file descriptor passed by systemd is not a listening TCP or Unix socket")
 }
 
 /// Ждёт простоя: нет запросов в обработке и нет активности дольше `idle`.
@@ -81,7 +79,7 @@ pub async fn idle_watch(state: AppState, idle: Duration) {
         let busy = state.activity.in_flight.load(Ordering::SeqCst) > 0;
         let last = state.activity.last.load(Ordering::Relaxed);
         if !busy && now_ms() - last >= idle_ms {
-            tracing::info!(idle_ms, "простой: завершаюсь");
+            tracing::info!(idle_ms, "idle timeout: exiting");
             return;
         }
     }
@@ -123,7 +121,7 @@ pub async fn run(state: AppState, listener: AnyListener, idle: Duration) -> anyh
         // Разбудить ожидающие long-poll, чтобы graceful shutdown не ждал их таймаута.
         st.shutdown.send_replace(true);
     };
-    tracing::info!(listen = %listener.describe(), idle_s = idle.as_secs(), "selfsync слушает");
+    tracing::info!(listen = %listener.describe(), idle_s = idle.as_secs(), "selfsync listening");
     let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
     match listener {
         AnyListener::Tcp(l) => {
@@ -136,6 +134,6 @@ pub async fn run(state: AppState, listener: AnyListener, idle: Duration) -> anyh
     let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
     let st = state.clone();
     tokio::task::spawn_blocking(move || st.checkpoint()).await?;
-    tracing::info!("остановлен");
+    tracing::info!("stopped");
     Ok(())
 }

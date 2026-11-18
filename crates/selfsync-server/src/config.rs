@@ -145,9 +145,9 @@ impl Config {
         let file: FileConfig = match config_file {
             Some(p) => {
                 let text = std::fs::read_to_string(p)
-                    .with_context(|| format!("не читается конфиг {}", p.display()))?;
+                    .with_context(|| format!("cannot read configuration {}", p.display()))?;
                 toml::from_str(&text)
-                    .with_context(|| format!("ошибка в конфиге {}", p.display()))?
+                    .with_context(|| format!("invalid configuration {}", p.display()))?
             }
             None => FileConfig::default(),
         };
@@ -192,17 +192,16 @@ impl Config {
         if let Some(t) = &metrics_token
             && t.trim().chars().count() < METRICS_TOKEN_MIN
         {
-            bail!("SELFSYNC_METRICS_TOKEN: не короче {METRICS_TOKEN_MIN} символов");
+            bail!("SELFSYNC_METRICS_TOKEN: at least {METRICS_TOKEN_MIN} characters required");
         }
         let quota = load_quota(&env, file.quota)?;
-        let sqlite_synchronous = match env("SELFSYNC_SQLITE_SYNCHRONOUS")
-            .or(file.sqlite_synchronous)
-        {
-            Some(s) => Synchronous::parse(&s).with_context(|| {
-                format!("SELFSYNC_SQLITE_SYNCHRONOUS: ожидается full или normal, получено «{s}»")
-            })?,
-            None => Synchronous::default(),
-        };
+        let sqlite_synchronous =
+            match env("SELFSYNC_SQLITE_SYNCHRONOUS").or(file.sqlite_synchronous) {
+                Some(s) => Synchronous::parse(&s).with_context(|| {
+                    format!("SELFSYNC_SQLITE_SYNCHRONOUS: expected full or normal, received {s}")
+                })?,
+                None => Synchronous::default(),
+            };
         Ok(Config {
             data_dir,
             public_url,
@@ -248,7 +247,7 @@ fn load_quota(
     };
     let devices = match env("SELFSYNC_QUOTA_DEVICES") {
         Some(s) => s.trim().parse().with_context(|| {
-            format!("SELFSYNC_QUOTA_DEVICES: нужно целое число ≥ 0, получено «{s}»")
+            format!("SELFSYNC_QUOTA_DEVICES: expected an integer >= 0, received {s}")
         })?,
         None => file.devices.unwrap_or(0),
     };
@@ -263,7 +262,7 @@ fn load_quota(
     };
     let d = q.defaults;
     if d.soft > 0 && d.hard > 0 && d.soft > d.hard {
-        bail!("SELFSYNC_QUOTA_SOFT больше SELFSYNC_QUOTA_HARD");
+        bail!("SELFSYNC_QUOTA_SOFT exceeds SELFSYNC_QUOTA_HARD");
     }
     Ok(q)
 }
@@ -275,7 +274,7 @@ fn load_rate(env: &dyn Fn(&str) -> Option<String>, file: FileRate) -> anyhow::Re
             Some(s) => s
                 .trim()
                 .parse()
-                .with_context(|| format!("{name}: нужно целое число ≥ 0, получено «{s}»")),
+                .with_context(|| format!("{name}: expected an integer >= 0, received {s}")),
             None => Ok(f.unwrap_or(def)),
         }
     };
@@ -287,7 +286,9 @@ fn load_rate(env: &dyn Fn(&str) -> Option<String>, file: FileRate) -> anyhow::Re
         };
         let v = parse_duration(&s).with_context(|| name.to_owned())?;
         if v < Duration::from_secs(1) {
-            bail!("{name}: не меньше секунды (выключить лимит — порогом 0), получено «{s}»");
+            bail!(
+                "{name}: must be at least one second (set the threshold to 0 to disable); received {s}"
+            );
         }
         Ok(v)
     };
@@ -330,7 +331,7 @@ fn parse_bool(name: &str, s: &str) -> anyhow::Result<bool> {
     match s.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
         "0" | "false" | "no" | "off" => Ok(false),
-        _ => bail!("{name}: ожидается 1 или 0, получено «{s}»"),
+        _ => bail!("{name}: expected 1 or 0, received {s}"),
     }
 }
 
@@ -340,7 +341,7 @@ pub fn parse_duration(s: &str) -> anyhow::Result<Duration> {
     if s == "0" {
         return Ok(Duration::ZERO);
     }
-    humantime::parse_duration(s).with_context(|| format!("неверная длительность: {s}"))
+    humantime::parse_duration(s).with_context(|| format!("invalid duration: {s}"))
 }
 
 /// Размер: `512MiB`, `16MB`, `1024`, `8 KiB`.
@@ -348,9 +349,7 @@ pub fn parse_size(s: &str) -> anyhow::Result<u64> {
     let t = s.trim();
     let split = t.find(|c: char| !c.is_ascii_digit()).unwrap_or(t.len());
     let (num, unit) = t.split_at(split);
-    let n: u64 = num
-        .parse()
-        .with_context(|| format!("неверный размер: {s}"))?;
+    let n: u64 = num.parse().with_context(|| format!("invalid size: {s}"))?;
     let mult: u64 = match unit.trim().to_ascii_lowercase().as_str() {
         "" | "b" => 1,
         "k" | "kb" => 1000,
@@ -359,9 +358,9 @@ pub fn parse_size(s: &str) -> anyhow::Result<u64> {
         "mib" => 1024 * 1024,
         "g" | "gb" => 1000 * 1000 * 1000,
         "gib" => 1024 * 1024 * 1024,
-        other => bail!("неизвестная единица размера: {other}"),
+        other => bail!("unknown size unit: {other}"),
     };
-    n.checked_mul(mult).context("размер слишком велик")
+    n.checked_mul(mult).context("size is too large")
 }
 
 #[cfg(test)]
@@ -431,7 +430,7 @@ mod tests {
         assert_eq!(r.auth.window, Duration::from_secs(300)); // окружение приоритетнее
         assert_eq!(r.auth.block, Duration::from_secs(30));
         let e = rate_from(&[("SELFSYNC_RATE_REDEEM_BLOCK", "500ms")], "").unwrap_err();
-        assert!(format!("{e:#}").contains("не меньше секунды"));
+        assert!(format!("{e:#}").contains("at least one second"));
         assert!(rate_from(&[("SELFSYNC_RATE_REDEEM_GLOBAL", "-1")], "").is_err());
         assert!(toml::from_str::<FileConfig>("[rate]\nbogus = 1").is_err());
     }

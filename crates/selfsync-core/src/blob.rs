@@ -42,21 +42,21 @@ const COMPRESS_MIN: u64 = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BlobError {
-    #[error("не блоб selfsync")]
+    #[error("not a selfsync blob")]
     BadMagic,
-    #[error("неподдерживаемая версия формата блоба: {0}")]
+    #[error("unsupported blob format version: {0}")]
     UnsupportedVersion(u8),
-    #[error("неизвестные флаги блоба")]
+    #[error("unknown blob flags")]
     BadFlags,
-    #[error("блоб обрезан или длина не сходится")]
+    #[error("blob is truncated or its length does not match")]
     Truncated,
-    #[error("блоб зашифрован, а ключа нет")]
+    #[error("blob is encrypted but no key is available")]
     NeedKey,
-    #[error("ошибка расшифровки: данные повреждены или подменены")]
+    #[error("decryption failed: data is damaged or has been tampered with")]
     Decrypt,
-    #[error("ошибка распаковки")]
+    #[error("decompression failed")]
     Decompress,
-    #[error("неверный индекс чанка")]
+    #[error("invalid chunk index")]
     BadChunk,
 }
 

@@ -104,12 +104,16 @@ pub fn doctor(config: &Config, opts: &Options) -> Report {
 }
 
 fn data_dir(config: &Config, r: &mut Report) -> bool {
-    let what = "каталог данных";
+    let what = "data directory";
     let dir = &config.data_dir;
     let md = match std::fs::metadata(dir) {
         Ok(m) if m.is_dir() => m,
         Ok(_) => {
-            r.add(Level::Fail, what, format!("{} — не каталог", dir.display()));
+            r.add(
+                Level::Fail,
+                what,
+                format!("{} is not a directory", dir.display()),
+            );
             return false;
         }
         Err(e) => {
@@ -127,7 +131,7 @@ fn data_dir(config: &Config, r: &mut Report) -> bool {
                 Level::Fail,
                 what,
                 format!(
-                    "{}: запись невозможна ({e}) — сервер не сможет сохранять",
+                    "{}: cannot write ({e}); the server cannot save data",
                     dir.display()
                 ),
             );
@@ -139,8 +143,7 @@ fn data_dir(config: &Config, r: &mut Report) -> bool {
             Level::Warn,
             what,
             format!(
-                "{} доступен другим пользователям системы (права {:o}) — там токены и \
-                 заметки; chmod 700",
+                "{} is accessible to other system users (permissions {:o}); it contains tokens and notes; run chmod 700",
                 dir.display(),
                 md.permissions().mode() & 0o777
             ),
@@ -166,29 +169,29 @@ fn free_space(dir: &Path) -> Option<(u64, u64)> {
 }
 
 fn disk_space(dir: &Path, r: &mut Report) {
-    let what = "место на диске";
+    let what = "disk space";
     let Some((free, total)) = free_space(dir) else {
-        r.add(Level::Skip, what, "не удалось узнать");
+        r.add(Level::Skip, what, "could not determine");
         return;
     };
-    let text = format!("свободно {} из {}", fmt_bytes(free), fmt_bytes(total));
+    let text = format!("{} free of {}", fmt_bytes(free), fmt_bytes(total));
     if free < GIB / 10 {
         r.add(
             Level::Fail,
             what,
-            format!("{text} — сервер вот-вот перестанет принимать файлы"),
+            format!("{text}; the server will soon stop accepting files"),
         );
     } else if free < GIB || free.saturating_mul(20) < total {
-        r.add(Level::Warn, what, format!("{text} — мало"));
+        r.add(Level::Warn, what, format!("{text}; low"));
     } else {
         r.add(Level::Ok, what, text);
     }
 }
 
 fn databases(config: &Config, r: &mut Report) -> Vec<String> {
-    let what = "базы";
+    let what = "databases";
     if let Err(e) = crate::cmd::server_conn(config) {
-        r.add(Level::Fail, what, format!("server.db не открывается: {e}"));
+        r.add(Level::Fail, what, format!("cannot open server.db: {e}"));
         return Vec::new();
     }
     let names = list_vault_dirs(config);
@@ -196,17 +199,13 @@ fn databases(config: &Config, r: &mut Report) -> Vec<String> {
     for n in names {
         match open_vault(config, &n, 1) {
             Ok(_) => ok.push(n),
-            Err(e) => r.add(
-                Level::Fail,
-                what,
-                format!("vault «{n}» не открывается: {e}"),
-            ),
+            Err(e) => r.add(Level::Fail, what, format!("cannot open vault {n}: {e}")),
         }
     }
     r.add(
         Level::Ok,
         what,
-        format!("server.db и vault'ов: {}", ok.len()),
+        format!("server.db and {} vault databases", ok.len()),
     );
     ok
 }
@@ -223,13 +222,12 @@ fn is_local(host: &str) -> bool {
 }
 
 fn public_url(config: &Config, r: &mut Report) {
-    let what = "внешний адрес";
+    let what = "public URL";
     let Some(url) = &config.public_url else {
         r.add(
             Level::Warn,
             what,
-            "SELFSYNC_PUBLIC_URL не задан: ссылки подключения строятся из заголовков \
-             запроса и за прокси могут указать на внутренний адрес",
+            "SELFSYNC_PUBLIC_URL is unset: connection links use request headers and may point to an internal address behind a proxy",
         );
         return;
     };
@@ -239,8 +237,7 @@ fn public_url(config: &Config, r: &mut Report) {
             Level::Warn,
             what,
             format!(
-                "{url} — без TLS: токены и (без шифрования) заметки идут открыто, а \
-                 мобильный Obsidian может отказаться соединяться"
+                "{url} has no TLS: tokens and unencrypted notes are sent in plaintext; mobile Obsidian may refuse the connection"
             ),
         );
     } else {
@@ -251,9 +248,8 @@ fn public_url(config: &Config, r: &mut Report) {
     if proxied && !config.trusted_proxy {
         r.add(
             Level::Warn,
-            "прокси",
-            "похоже, сервер за обратным прокси, а SELFSYNC_TRUSTED_PROXY выключен: лимит \
-             неудачных попыток считает всех клиентов одним адресом прокси",
+            "proxy",
+            "server appears to be behind a reverse proxy, but SELFSYNC_TRUSTED_PROXY is off: the failed-attempt limiter counts all clients as one proxy address",
         );
     }
 }
@@ -266,7 +262,7 @@ fn has_command(name: &str) -> bool {
 }
 
 fn external(config: &Config, r: &mut Report) {
-    let what = "снаружи";
+    let what = "external access";
     let Some(url) = &config.public_url else {
         return;
     };
@@ -274,8 +270,7 @@ fn external(config: &Config, r: &mut Report) {
         r.add(
             Level::Skip,
             what,
-            "curl не найден — проверьте с устройства: selfsync-cli check или «Проверить \
-             соединение» в плагине",
+            "curl not found; check from a device with selfsync-cli check or Check connection in the plugin",
         );
         return;
     }
@@ -294,13 +289,13 @@ fn external(config: &Config, r: &mut Report) {
     let stderr = String::from_utf8_lossy(&out.stderr);
     match out.status.code() {
         Some(0) if stdout.contains("\"status\":\"ok\"") => {
-            r.add(Level::Ok, what, format!("{url} отвечает"));
+            r.add(Level::Ok, what, format!("{url} responds"));
         }
         Some(0) => r.add(
             Level::Fail,
             what,
             format!(
-                "{url}/v1/health отвечает не как selfsync (HTTP {}) — проверьте путь в прокси",
+                "{url}/v1/health is not a selfsync response (HTTP {}); check the proxy path",
                 stdout.lines().last().unwrap_or("?")
             ),
         ),
@@ -308,12 +303,12 @@ fn external(config: &Config, r: &mut Report) {
         Some(60 | 51 | 35) => r.add(
             Level::Fail,
             what,
-            format!("сертификат {url} не принят: {}", stderr.trim()),
+            format!("certificate for {url} rejected: {}", stderr.trim()),
         ),
         _ => r.add(
             Level::Fail,
             what,
-            format!("{url} недоступен отсюда: {}", stderr.trim()),
+            format!("{url} is unreachable from here: {}", stderr.trim()),
         ),
     }
 }
@@ -356,27 +351,26 @@ fn timers(root: &Path, r: &mut Report) {
     for (unit, why) in [
         (
             "selfsync-verify.timer",
-            "порча хранилища останется незамеченной",
+            "storage corruption will go undetected",
         ),
-        ("selfsync-backup.timer", "бэкапов не будет"),
+        ("selfsync-backup.timer", "no backups will be made"),
         (
             "selfsync-sweep.timer",
-            "удалённое не стирается после срока хранения",
+            "deleted files will not be purged after retention expires",
         ),
     ] {
         match timer_state(root, unit) {
-            "enabled" => r.add(Level::Ok, unit, "включён"),
+            "enabled" => r.add(Level::Ok, unit, "enabled"),
             "disabled" => r.add(
                 Level::Warn,
                 unit,
-                format!("не включён — {why}; systemctl enable --now {unit}"),
+                format!("not enabled: {why}; systemctl enable --now {unit}"),
             ),
             _ => r.add(
                 Level::Warn,
                 unit,
                 format!(
-                    "не установлен — {why}; юниты — в deploy/systemd репозитория, затем \
-                     systemctl enable --now {unit}"
+                    "not installed: {why}; units are in deploy/systemd; then systemctl enable --now {unit}"
                 ),
             ),
         }
@@ -384,12 +378,12 @@ fn timers(root: &Path, r: &mut Report) {
 }
 
 fn backups(config: &Config, opts: &Options, systemd: bool, r: &mut Report) {
-    let what = "бэкапы";
+    let what = "backups";
     let dir = &opts.backup_dir;
     let Ok(md) = std::fs::metadata(dir) else {
         // Без systemd бэкапы могут жить где угодно: не знаем, где искать.
         let level = if systemd { Level::Warn } else { Level::Skip };
-        r.add(level, what, format!("{} не найден", dir.display()));
+        r.add(level, what, format!("{} not found", dir.display()));
         return;
     };
     let data_dev = std::fs::metadata(&config.data_dir).map(|m| m.dev()).ok();
@@ -398,8 +392,7 @@ fn backups(config: &Config, opts: &Options, systemd: bool, r: &mut Report) {
             Level::Warn,
             what,
             format!(
-                "{} на том же диске, что и данные — отказ диска унесёт и их; смонтируйте \
-                 туда другой диск",
+                "{} is on the same disk as the data; a disk failure loses both; mount a separate disk there",
                 dir.display()
             ),
         );
@@ -415,13 +408,17 @@ fn backups(config: &Config, opts: &Options, systemd: bool, r: &mut Report) {
         .map(|m| crate::blobs::mtime_ms(&m))
         .max();
     match newest {
-        None => r.add(Level::Warn, what, format!("в {} пусто", dir.display())),
+        None => r.add(Level::Warn, what, format!("{} is empty", dir.display())),
         Some(at) if opts.now_ms - at > BACKUP_STALE_MS => r.add(
             Level::Warn,
             what,
-            format!("последний — {} дн. назад", (opts.now_ms - at) / DAY_MS),
+            format!("latest backup is {} days old", (opts.now_ms - at) / DAY_MS),
         ),
-        Some(_) => r.add(Level::Ok, what, format!("свежий в {}", dir.display())),
+        Some(_) => r.add(
+            Level::Ok,
+            what,
+            format!("recent backup in {}", dir.display()),
+        ),
     }
 }
 
@@ -436,7 +433,7 @@ fn vault(config: &Config, name: &str, now: i64, r: &mut Report) {
         None => r.add(
             Level::Warn,
             &what,
-            "selfsync verify ещё не запускался — включите selfsync-verify.timer",
+            "selfsync verify has never run; enable selfsync-verify.timer",
         ),
         Some(_)
             if m("verify_db_errors").unwrap_or(0) > 0
@@ -445,15 +442,15 @@ fn vault(config: &Config, name: &str, now: i64, r: &mut Report) {
             r.add(
                 Level::Fail,
                 &what,
-                "последний verify нашёл ошибки базы или записи ключа — selfsync verify",
+                "last verify found database or key-record errors; run selfsync verify",
             );
         }
         Some(at) if now - at > VERIFY_STALE_MS => r.add(
             Level::Warn,
             &what,
-            format!("последний verify — {} дн. назад", (now - at) / DAY_MS),
+            format!("last verify was {} days ago", (now - at) / DAY_MS),
         ),
-        Some(_) => r.add(Level::Ok, &what, "verify свежий"),
+        Some(_) => r.add(Level::Ok, &what, "recent verification"),
     }
     let wanted = crate::db::vault::vault_state(&c)
         .map(|s| s.blobs_wanted)
@@ -462,7 +459,7 @@ fn vault(config: &Config, name: &str, now: i64, r: &mut Report) {
         r.add(
             Level::Warn,
             &what,
-            format!("повреждено блобов: {wanted}, ждут копий с устройств"),
+            format!("{wanted} damaged blobs awaiting copies from devices"),
         );
     }
     let l = crate::quota::limits(&c, &config.quota.defaults).unwrap_or_default();
@@ -472,7 +469,7 @@ fn vault(config: &Config, name: &str, now: i64, r: &mut Report) {
             Level::Fail,
             &what,
             format!(
-                "место закончилось: {} из {} — новые файлы не принимаются",
+                "storage full: {} of {}; new files are refused",
                 fmt_bytes(used),
                 fmt_bytes(l.hard)
             ),
@@ -482,7 +479,7 @@ fn vault(config: &Config, name: &str, now: i64, r: &mut Report) {
             Level::Warn,
             &what,
             format!(
-                "занято {} — больше порога {}",
+                "{} used, exceeding threshold {}",
                 fmt_bytes(used),
                 fmt_bytes(l.soft)
             ),
@@ -496,7 +493,7 @@ fn vault(config: &Config, name: &str, now: i64, r: &mut Report) {
         r.add(
             Level::Warn,
             &what,
-            format!("устройств {n} из {} — новых не подключить", l.devices),
+            format!("{n} devices of {}; no more can connect", l.devices),
         );
     }
 }
@@ -511,16 +508,12 @@ fn server_quota(config: &Config, vaults: &[String], r: &mut Report) {
         .filter_map(|n| open_vault(config, n, 1).ok())
         .filter_map(|v| v.pool.get().ok().and_then(|c| crate::quota::usage(&c).ok()))
         .sum();
-    let text = format!("занято {} из {}", fmt_bytes(used), fmt_bytes(hard));
-    let what = "квота сервера";
+    let text = format!("{} used of {}", fmt_bytes(used), fmt_bytes(hard));
+    let what = "server quota";
     if used >= hard {
-        r.add(
-            Level::Fail,
-            what,
-            format!("{text} — новые файлы не принимаются"),
-        );
+        r.add(Level::Fail, what, format!("{text}; new files are refused"));
     } else if used.saturating_mul(10) >= hard.saturating_mul(9) {
-        r.add(Level::Warn, what, format!("{text} — почти всё"));
+        r.add(Level::Warn, what, format!("{text}; almost full"));
     } else {
         r.add(Level::Ok, what, text);
     }

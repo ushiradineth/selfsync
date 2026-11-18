@@ -93,7 +93,9 @@ pub(crate) async fn unique_copy(cx: &Ctx, key: &str, label: &str) -> SyncResult<
             return Ok(cand);
         }
     }
-    Err(SyncError::Io("не найдено свободное имя для копии".into()))
+    Err(SyncError::Io(
+        "no available filename for a conflict copy".into(),
+    ))
 }
 
 pub(crate) fn conflict_label(cx: &Ctx, initial: bool) -> String {
@@ -151,7 +153,7 @@ pub(crate) fn add_conflict(cx: &Ctx, path: &str, copy: &str, initial: bool) {
     });
     cx.log(
         LogLevel::Warn,
-        format!("конфликт: {path} — локальная версия сохранена как {copy}"),
+        format!("conflict: {path}; local version saved as {copy}"),
     );
     if initial {
         cx.notify(Notice::LocalCopySaved {
@@ -227,7 +229,7 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
                 });
                 cx.log(
                     LogLevel::Info,
-                    format!("{key} переименован на другом устройстве в {to}; правки перенесены"),
+                    format!("{key} renamed to {to} on another device; edits moved"),
                 );
                 cx.notify(Notice::FollowedRename {
                     from: key.to_owned(),
@@ -247,7 +249,7 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
         });
         cx.log(
             LogLevel::Info,
-            format!("{key} удалён на другом устройстве, но изменён здесь — возвращается"),
+            format!("{key} deleted on another device but edited locally; restoring"),
         );
         cx.notify(Notice::RestoredEdited {
             path: key.to_owned(),
@@ -273,7 +275,7 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
     }
 
     let Some(remote_hash) = r.hash else {
-        return Err(SyncError::Protocol("живая запись без хэша".into()));
+        return Err(SyncError::Protocol("live entry has no hash".into()));
     };
     let small_local = meta.size <= SMALL_BLOB;
     let small_remote = r.size <= SMALL_BLOB;
@@ -397,7 +399,7 @@ async fn last_write_wins(
         });
         cx.log(
             LogLevel::Info,
-            format!("{key}: своя версия новее серверной — уходит поверх"),
+            format!("{key}: local version is newer; uploading replacement"),
         );
         return Ok(());
     }
@@ -452,7 +454,7 @@ async fn last_write_wins(
     }
     cx.log(
         LogLevel::Info,
-        format!("{key}: серверная версия новее — своя в корзине"),
+        format!("{key}: server version is newer; local version moved to trash"),
     );
     cx.save().await
 }
@@ -526,7 +528,7 @@ async fn write_merged(
         }
     });
     cx.cache_put(sp, sb).await;
-    cx.log(LogLevel::Info, format!("слито без конфликтов: {key}"));
+    cx.log(LogLevel::Info, format!("merged without conflicts: {key}"));
     Ok(())
 }
 
@@ -671,7 +673,7 @@ pub(crate) async fn resolve_delete(cx: &Ctx, key: &str, r: Remote) -> SyncResult
         return Ok(());
     }
     let Some(h) = r.hash else {
-        return Err(SyncError::Protocol("живая запись без хэша".into()));
+        return Err(SyncError::Protocol("live entry has no hash".into()));
     };
     // На сервере та же версия, что мы удалили (сменилась только ревизия, например
     // после сброса баз): повторить удаление с актуальной ревизией.
@@ -712,7 +714,7 @@ pub(crate) async fn resolve_delete(cx: &Ctx, key: &str, r: Remote) -> SyncResult
             }
             cx.log(
                 LogLevel::Info,
-                format!("{key}: удаление отменено — файл изменён на другом устройстве"),
+                format!("{key}: deletion cancelled because another device edited the file"),
             );
             cx.notify(Notice::RestoredRemote {
                 path: key.to_owned(),
@@ -870,7 +872,7 @@ pub(crate) async fn split_case(
     if applied {
         cx.log(
             LogLevel::Warn,
-            format!("{key} совпадает с {existing} без учёта регистра: переименован в {copy}"),
+            format!("{key} collides with {existing} ignoring case; renamed to {copy}"),
         );
         cx.with_mut(|s| s.sync_due = Some(s.now));
     }

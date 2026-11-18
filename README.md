@@ -1,5 +1,21 @@
 # selfsync
 
+This is the English-first security maintenance fork at
+[`ushiradineth/selfsync`](https://github.com/ushiradineth/selfsync), based on
+[`Darkildo/selfsync`](https://github.com/Darkildo/selfsync). Server and CLI help,
+errors, logs and diagnostics use English; the Obsidian plugin starts in English.
+The protocol and existing vault data remain compatible with upstream 0.10.1.
+
+Fork releases contain the Obsidian plugin (`0.10.2`), Linux server/CLI binaries
+(`server-0.10.2`) and the multi-platform image `ghcr.io/ushiradineth/selfsync:0.10.2`.
+Install this fork's plugin release to receive its desktop filesystem fixes;
+changing only the server image does not update Obsidian's installed plugin.
+
+**Security boundary:** end-to-end encryption protects confidentiality but does
+not authenticate file placement or freshness against a malicious server. Keep
+independent backups. See [SECURITY.md](SECURITY.md) for the threat model and
+remaining limitations.
+
 **English** · [Русский](README.ru.md)
 
 Sync your Obsidian vault through a server you run yourself. One small Rust binary, data in SQLite and plain files, a plugin for Obsidian on desktop and mobile, and a command-line client for servers and NAS boxes.
@@ -73,7 +89,7 @@ The script:
 
 Run it again to update: the data is archived to `/root` first, and the previous binary stays next to the new one. With `--no-proxy` it skips Caddy, for when you already run your own proxy. Admin commands then go through `selfsync-admin`, which runs them as the service user: `selfsync-admin token list`, `selfsync-admin link --vault notes --name phone`.
 
-**Docker:** take [deploy/quickstart](deploy/quickstart). It runs the prebuilt image `ghcr.io/darkildo/selfsync:<version>` (amd64 and arm64, from server 0.8.0 on), a small distroless image around the release binary.
+**Docker:** take [deploy/quickstart](deploy/quickstart). It runs the prebuilt image `ghcr.io/ushiradineth/selfsync:<version>` (amd64 and arm64, from server 0.8.0 on), a small distroless image around the release binary.
 
 ```sh
 cp .env.example .env          # domain, email, version
@@ -82,7 +98,7 @@ docker compose up -d
 docker compose run --rm selfsync link --vault notes --name phone
 ```
 
-To update, set the new version in `SELFSYNC_VERSION` in `.env`, then run `docker compose pull && docker compose up -d`. The image is built by GitHub Actions from the published release binary (checked against `SHA256SUMS`) and carries a provenance attestation: `gh attestation verify oci://ghcr.io/darkildo/selfsync:X.Y.Z --owner Darkildo`. To build the same image yourself instead of pulling it: `docker compose -f docker-compose.yml -f compose.build.yml up -d --build`.
+To update, set the new version in `SELFSYNC_VERSION` in `.env`, then run `docker compose pull && docker compose up -d`. The image is built by GitHub Actions from the published release binary (checked against `SHA256SUMS`) and carries a provenance attestation: `gh attestation verify oci://ghcr.io/ushiradineth/selfsync:X.Y.Z --owner ushiradineth`. To build the same image yourself instead of pulling it: `docker compose -f docker-compose.yml -f compose.build.yml up -d --build`.
 
 The rest of this section explains the modes and settings in detail.
 
@@ -106,7 +122,7 @@ Static binaries (musl, x86_64 and aarch64) are published in `server-X.Y.Z` relea
 
 ```sh
 sha256sum -c SHA256SUMS --ignore-missing
-gh attestation verify selfsync-x86_64-unknown-linux-musl --repo Darkildo/selfsync
+gh attestation verify selfsync-x86_64-unknown-linux-musl --repo ushiradineth/selfsync
 sudo install -m 0755 selfsync-x86_64-unknown-linux-musl /usr/local/bin/selfsync
 ```
 
@@ -140,13 +156,13 @@ docker compose --profile always up -d           # or --profile ondemand (Sablier
 docker compose run --rm selfsync token add --vault notes --name laptop
 ```
 
-This compose file builds the image from the source (tag `localhost/selfsync:local`) and never pulls it from a registry. For the prebuilt image `ghcr.io/darkildo/selfsync`, use [deploy/quickstart](deploy/quickstart/) or put `image: ghcr.io/darkildo/selfsync:X.Y.Z` in place of the `build:` section.
+This compose file builds the image from the source (tag `localhost/selfsync:local`) and never pulls it from a registry. For the prebuilt image `ghcr.io/ushiradineth/selfsync`, use [deploy/quickstart](deploy/quickstart/) or put `image: ghcr.io/ushiradineth/selfsync:X.Y.Z` in place of the `build:` section.
 
 The image is based on distroless/static: no shell, read-only file system, unprivileged process. Data is kept in `./data` through a bind mount rather than a named volume, because `docker compose down -v` deletes named volumes together with all your notes.
 
 ### Podman Quadlet
 
-[deploy/quadlet/](deploy/quadlet/) runs the container with socket activation under rootless Podman. It uses the prebuilt image `ghcr.io/darkildo/selfsync` with an explicit version; to update, change the version in `selfsync.container` and run `systemctl --user daemon-reload && systemctl --user restart selfsync.socket`. To build the image yourself instead, see the comment in the unit:
+[deploy/quadlet/](deploy/quadlet/) runs the container with socket activation under rootless Podman. It uses the prebuilt image `ghcr.io/ushiradineth/selfsync` with an explicit version; to update, change the version in `selfsync.container` and run `systemctl --user daemon-reload && systemctl --user restart selfsync.socket`. To build the image yourself instead, see the comment in the unit:
 
 ```sh
 podman build -t localhost/selfsync:local --build-arg VERSION=X.Y.Z deploy/quickstart

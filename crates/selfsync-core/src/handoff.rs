@@ -72,7 +72,7 @@ pub struct Ephemeral {
 
 impl std::fmt::Debug for Ephemeral {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Ephemeral(секрет скрыт)")
+        write!(f, "Ephemeral(secret redacted)")
     }
 }
 

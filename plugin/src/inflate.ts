@@ -30,7 +30,7 @@ function huffman(lengths: ArrayLike<number>, n: number): Huffman {
   let left = 1;
   for (let len = 1; len < 16; len++) {
     left = (left << 1) - counts[len]!;
-    if (left < 0) throw new Error("inflate: переполненный код Хаффмана");
+    if (left < 0) throw new Error("inflate: oversubscribed Huffman code");
   }
   const offs = new Uint16Array(16);
   for (let len = 1; len < 15; len++) offs[len + 1] = offs[len]! + counts[len]!;
@@ -88,7 +88,7 @@ class Inflater {
   /** Добрать в буфер не меньше need бит (за концом входа — нули, их ловит проверка ниже). */
   private fill(need: number): void {
     while (this.cnt < need) {
-      if (this.pos > this.src.length + 4) throw new Error("inflate: поток оборван");
+      if (this.pos > this.src.length + 4) throw new Error("inflate: truncated stream");
       this.buf |= (this.src[this.pos++] ?? 0) << this.cnt;
       this.cnt += 8;
     }
@@ -124,7 +124,7 @@ class Inflater {
       first = (first + count) << 1;
       code <<= 1;
     }
-    throw new Error("inflate: неверный код Хаффмана");
+    throw new Error("inflate: invalid Huffman code");
   }
 
   private room(n: number): void {
@@ -143,12 +143,12 @@ class Inflater {
     this.buf = 0;
     this.cnt = 0;
     const s = this.src;
-    if (this.pos + 4 > s.length) throw new Error("inflate: поток оборван");
+    if (this.pos + 4 > s.length) throw new Error("inflate: truncated stream");
     const n = s[this.pos]! | (s[this.pos + 1]! << 8);
     const nn = s[this.pos + 2]! | (s[this.pos + 3]! << 8);
-    if ((n ^ 0xffff) !== nn) throw new Error("inflate: неверная длина блока");
+    if ((n ^ 0xffff) !== nn) throw new Error("inflate: invalid block length");
     this.pos += 4;
-    if (this.pos + n > s.length) throw new Error("inflate: поток оборван");
+    if (this.pos + n > s.length) throw new Error("inflate: truncated stream");
     this.room(n);
     this.out.set(s.subarray(this.pos, this.pos + n), this.len);
     this.len += n;
@@ -159,7 +159,7 @@ class Inflater {
     const nlen = this.bits(5) + 257;
     const ndist = this.bits(5) + 1;
     const ncode = this.bits(4) + 4;
-    if (nlen > 286 || ndist > 30) throw new Error("inflate: неверный заголовок блока");
+    if (nlen > 286 || ndist > 30) throw new Error("inflate: invalid block header");
     const cl = new Uint8Array(19);
     for (let i = 0; i < ncode; i++) cl[CL_ORDER[i]!] = this.bits(3);
     const clh = huffman(cl, 19);
@@ -173,12 +173,12 @@ class Inflater {
       let rep: number;
       let val = 0;
       if (sym === 16) {
-        if (i === 0) throw new Error("inflate: повтор без предыдущей длины");
+        if (i === 0) throw new Error("inflate: repeat without previous length");
         val = lengths[i - 1]!;
         rep = 3 + this.bits(2);
       } else if (sym === 17) rep = 3 + this.bits(3);
       else rep = 11 + this.bits(7);
-      if (i + rep > nlen + ndist) throw new Error("inflate: лишние длины кодов");
+      if (i + rep > nlen + ndist) throw new Error("inflate: too many code lengths");
       lengths.fill(val, i, i + rep);
       i += rep;
     }
@@ -195,12 +195,12 @@ class Inflater {
         return;
       } else {
         const li = sym - 257;
-        if (li >= 29) throw new Error("inflate: неверная длина");
+        if (li >= 29) throw new Error("inflate: invalid length");
         const n = LEN_BASE[li]! + this.bits(LEN_EXTRA[li]!);
         const di = this.decode(dist);
-        if (di >= 30) throw new Error("inflate: неверное расстояние");
+        if (di >= 30) throw new Error("inflate: invalid distance");
         const d = DIST_BASE[di]! + this.bits(DIST_EXTRA[di]!);
-        if (d > this.len) throw new Error("inflate: расстояние за началом");
+        if (d > this.len) throw new Error("inflate: distance before start of output");
         this.room(n);
         const o = this.out;
         let from = this.len - d;
@@ -223,10 +223,10 @@ class Inflater {
       if (type === 0) this.stored();
       else if (type === 1) this.codes(...fixed());
       else if (type === 2) this.codes(...this.dynamic());
-      else throw new Error("inflate: неверный тип блока");
+      else throw new Error("inflate: invalid block type");
     }
     // Поток кончился раньше, чем данные (дочитаны нули за концом входа).
-    if (this.pos - (this.cnt >> 3) > this.src.length) throw new Error("inflate: поток оборван");
+    if (this.pos - (this.cnt >> 3) > this.src.length) throw new Error("inflate: truncated stream");
     return this.out.slice(0, this.len);
   }
 }

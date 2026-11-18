@@ -55,28 +55,25 @@ async fn start_rekey(cx: &Ctx, password: String, remember: bool) -> SyncResult<U
         })
     };
     if !cx.with(|s| s.encrypted()) {
-        return fail("no_vault_key", "vault не зашифрован");
+        return fail("no_vault_key", "vault is not encrypted");
     }
     if cx.with(|s| s.index.migration.is_some() || s.rekey.is_some()) {
-        return fail("rekey_in_progress", "перешифровка уже идёт");
+        return fail("rekey_in_progress", "re-encryption already in progress");
     }
     if server_minor(cx).await? < MINOR_REKEY {
         return Err(SyncError::ServerOutdated(
-            "сервер не умеет смену ключа: обновите его до 0.3.0 или новее".into(),
+            "server does not support key rotation; upgrade to 0.3.0 or later".into(),
         ));
     }
     // Пароль проверяется сразу, а не в цикле: окну нужен ответ «неверный пароль».
     let vk = api::get_vault_key(cx).await?;
     if crate::crypto::has_prev(&vk.record) {
-        return fail(
-            "rekey_unfinished",
-            "предыдущая смена ключа ещё не завершена",
-        );
+        return fail("rekey_unfinished", "previous key rotation is not complete");
     }
     match crate::crypto::open_master_key(&vk.record, &password) {
         Ok(_) => {}
         Err(crate::crypto::CryptoError::WrongPassword) => {
-            return fail("wrong_password", "неверный пароль");
+            return fail("wrong_password", "incorrect password");
         }
         Err(e) => return fail("bad_vault_key", &e.to_string()),
     }
@@ -99,7 +96,7 @@ async fn remove_local(cx: &Ctx, path: &str) -> SyncResult<UiResult> {
             status: 409,
             code: "not_excluded".into(),
             message: format!(
-                "{root}: путь не исключён на этом устройстве (или правила ещё не применены)"
+                "{root}: path is not excluded on this device, or rules have not been applied yet"
             ),
         });
     }
@@ -152,7 +149,7 @@ async fn remove_local(cx: &Ctx, path: &str) -> SyncResult<UiResult> {
         .count();
     cx.log(
         LogLevel::Info,
-        format!("{root}: удалено локальных копий {removed}, оставлено {kept}"),
+        format!("{root}: removed {removed} local copies, kept {kept}"),
     );
     Ok(UiResult::Removed {
         removed,
@@ -276,7 +273,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                 return Err(SyncError::Http {
                     status: 400,
                     code: "bad_field".into(),
-                    message: "seqs: по одному на путь или пусто".into(),
+                    message: "seqs must be empty or contain one entry per path".into(),
                 });
             }
             let mut sp = Vec::new();
@@ -297,7 +294,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
         UiCommand::PurgeHistory { path, before_rev } => {
             if server_minor(cx).await? < MINOR_QUOTA {
                 return Err(SyncError::ServerOutdated(
-                    "сервер не умеет стирать историю: обновите его до 0.4.0 или новее".into(),
+                    "server does not support history purging; upgrade to 0.4.0 or later".into(),
                 ));
             }
             let v = vp(&path)?;
@@ -365,7 +362,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             // Сервер 0.1.x поле `read_only` молча отбросил бы и выдал полный доступ.
             if read_only && server_minor(cx).await? < MINOR_READ_ONLY {
                 return Err(SyncError::ServerOutdated(
-                    "сервер не поддерживает устройства только для чтения: обновите его до 0.2.1 или новее".into(),
+                    "server does not support read-only devices; upgrade to 0.2.1 or later".into(),
                 ));
             }
             let offer = if want_handoff {
@@ -452,7 +449,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                 return Err(SyncError::Http {
                     status: 404,
                     code: "not_skipped".into(),
-                    message: format!("{p}: не в списке пропущенных"),
+                    message: format!("{p}: not in the skipped-files list"),
                 });
             }
             cx.with_mut(|s| {
@@ -471,7 +468,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                 s.need_full_scan = true;
                 s.sync_due = Some(s.now);
             });
-            cx.log(LogLevel::Info, "удаления подтверждены: полный обход");
+            cx.log(LogLevel::Info, "deletions confirmed: starting full scan");
             Ok(UiResult::Ok)
         }
         UiCommand::VerifyContent => {
@@ -513,11 +510,11 @@ async fn restore_revision(cx: &Ctx, path: &str, rev: u64) -> SyncResult<UiResult
         return Err(SyncError::Http {
             status: 404,
             code: "revision_not_found".into(),
-            message: format!("ревизии {rev} нет"),
+            message: format!("revision {rev} does not exist"),
         });
     };
-    let hash =
-        Hash::from_slice(&r.hash).ok_or_else(|| SyncError::Protocol("ревизия без хэша".into()))?;
+    let hash = Hash::from_slice(&r.hash)
+        .ok_or_else(|| SyncError::Protocol("revision has no hash".into()))?;
     let f = cx.with(|s| s.index.files.get(&key).cloned());
     let target = match &f {
         Some(f) if f.clean() || f.local.is_none() => key.clone(),
@@ -543,7 +540,7 @@ async fn restore_revision(cx: &Ctx, path: &str, rev: u64) -> SyncResult<UiResult
         return Err(SyncError::Http {
             status: 409,
             code: "file_changed".into(),
-            message: "файл изменился, повторите".into(),
+            message: "file changed; retry".into(),
         });
     }
     cx.with_mut(|s| {

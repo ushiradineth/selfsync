@@ -43,23 +43,23 @@ const INFO_PREV: &[u8] = b"selfsync/v1/prev-kek";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CryptoError {
-    #[error("неверный пароль")]
+    #[error("incorrect password")]
     WrongPassword,
-    #[error("повреждённая запись ключа")]
+    #[error("damaged key record")]
     BadRecord,
-    #[error("неподдерживаемый формат записи ключа: {0}")]
+    #[error("unsupported key record format: {0}")]
     UnsupportedFormat(u32),
-    #[error("слишком слабые или слишком тяжёлые параметры KDF")]
+    #[error("KDF parameters are too weak or too expensive")]
     BadKdfParams,
-    #[error("ошибка расшифровки: данные повреждены или подменены")]
+    #[error("decryption failed: data is damaged or has been tampered with")]
     Decrypt,
-    #[error("нет источника случайности")]
+    #[error("randomness source unavailable")]
     Random,
-    #[error("неверная фраза восстановления")]
+    #[error("incorrect recovery phrase")]
     WrongPhrase,
-    #[error("у записи ключа нет фразы восстановления")]
+    #[error("key record has no recovery phrase")]
     NoRecovery,
-    #[error("предыдущая смена ключа ещё не завершена")]
+    #[error("previous key rotation is not complete")]
     RekeyUnfinished,
 }
 
@@ -233,7 +233,7 @@ impl VaultKeys {
         let mut siv = Aes256Siv::new_from_slice(&self.names).unwrap_or_else(|_| unreachable!());
         let out = siv
             .encrypt::<[&[u8]; 0], &[u8]>([], &padded)
-            .unwrap_or_else(|_| unreachable!("AES-SIV не отказывает на ограниченном входе"));
+            .unwrap_or_else(|_| unreachable!("AES-SIV cannot fail with bounded input"));
         padded.zeroize();
         out
     }

@@ -154,7 +154,7 @@ impl AppState {
     /// Открывает vault (каталог, схема) или берёт уже открытый.
     pub fn vault(&self, name: &str) -> ApiResult<Arc<Vault>> {
         if !db::server::valid_vault_name(name) {
-            return Err(ApiError::bad_request("bad_vault", "неверное имя vault'а"));
+            return Err(ApiError::bad_request("bad_vault", "invalid vault name"));
         }
         if let Some(v) = self
             .vaults

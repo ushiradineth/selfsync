@@ -184,7 +184,7 @@ impl Engine {
                     let c = cx.clone();
                     self.spawn(Kind::Unlock, async move {
                         if let Err(e) = crypto_flow::unlock(&c, password, remember).await {
-                            c.log(LogLevel::Warn, format!("пароль: {e}"));
+                            c.log(LogLevel::Warn, format!("password: {e}"));
                             c.notify(Notice::Error {
                                 code: "unlock_failed".into(),
                                 message: e.to_string(),
@@ -219,7 +219,7 @@ impl Engine {
                 let c = cx.clone();
                 self.spawn(Kind::Resolve, async move {
                     if let Err(e) = commands::resolve_choice(&c, id, choice).await {
-                        c.log(LogLevel::Warn, format!("решение конфликта: {e}"));
+                        c.log(LogLevel::Warn, format!("conflict resolution: {e}"));
                     }
                 });
             }
@@ -466,7 +466,7 @@ async fn sync_task(cx: Ctx) {
     if let Err(e) = &res
         && !matches!(e, SyncError::Network(_) | SyncError::Paused(_))
     {
-        cx.log(LogLevel::Warn, format!("синк: {e}"));
+        cx.log(LogLevel::Warn, format!("sync: {e}"));
     }
     if let Some(n) = notice {
         cx.notify(n);

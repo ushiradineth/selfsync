@@ -239,7 +239,7 @@ fn next_pause(cur: Duration, base: Duration, offline: bool, ui: &mut impl Prompt
         return base;
     }
     if cur == base {
-        ui.say("нет связи с сервером — повторяем…");
+        ui.say("server unreachable; retrying...");
     }
     (cur * 2).min(BACKOFF_MAX.max(base))
 }
@@ -270,7 +270,7 @@ pub async fn give_key(
                 name,
                 ..
             } => {
-                ui.say(&format!("ключ шифрования передан «{name}»"));
+                ui.say(&format!("encryption key transferred to {name}"));
                 return Ok(Exchange::Done);
             }
             UiResult::Handoff {
@@ -279,8 +279,7 @@ pub async fn give_key(
                 ..
             } => {
                 ui.say(&format!(
-                    "ключ шифрования мог быть отправлен «{name}» — проверьте на новом \
-                     устройстве, что он принят"
+                    "encryption key may have been sent to {name}; check that the new device received it"
                 ));
                 return Ok(Exchange::Done);
             }
@@ -291,7 +290,7 @@ pub async fn give_key(
                 ..
             } => {
                 ui.say(&format!(
-                    "ключ «{name}» не совпал с QR-кодом — возможна подмена, ключ не передан"
+                    "key from {name} does not match the QR code; possible tampering, key not transferred"
                 ));
                 return offer_revoke(sess, &name, device, ui).await;
             }
@@ -305,20 +304,17 @@ pub async fn give_key(
             } if confirm.as_deref() != Some(sas.as_str()) => {
                 let question = if qr {
                     format!(
-                        "«{name}» подключилось по QR-коду. Передать ему ключ шифрования? \
-                         (если новое устройство показывает цифры {}, сверьте: не совпадают — \
-                         отвечайте «нет»)",
+                        "{name} connected using a QR code. Transfer the encryption key? If the new device displays digits {}, compare them; answer no if they differ.",
                         format_sas(&sas)
                     )
                 } else {
                     format!(
-                        "«{name}» подключилось по коду. На нём должны быть цифры {}. \
-                         Передать ключ шифрования, только если совпадают?",
+                        "{name} connected using a code. It should display {}. Transfer the encryption key only if the digits match?",
                         format_sas(&sas)
                     )
                 };
                 if offline {
-                    ui.say("нет связи с сервером — ответ отправится, когда она вернётся");
+                    ui.say("server unreachable; your response will be sent when the connection returns");
                 }
                 match ui.ask(&question).await {
                     Answer::Yes => {}
@@ -327,7 +323,7 @@ pub async fn give_key(
                         if a == Answer::Interrupted {
                             return Ok(Exchange::Interrupted);
                         }
-                        ui.say("ключ не передан: на новом устройстве понадобится пароль");
+                        ui.say("key not transferred; the new device will need the password");
                         return offer_revoke(sess, &name, device, ui).await;
                     }
                 }
@@ -337,18 +333,18 @@ pub async fn give_key(
             }
             UiResult::Handoff { step, offline, .. } => {
                 if step == HandoffStep::Waiting && !waiting_said {
-                    ui.say("ждём новое устройство (Ctrl-C — выйти)…");
+                    ui.say("waiting for new device (Ctrl-C to exit)...");
                     waiting_said = true;
                 }
                 wait = next_pause(wait, interval, offline, ui);
             }
             UiResult::Error { message, .. } => {
                 ui.say(&format!(
-                    "ключ не передан: {message}. На новом устройстве можно ввести пароль"
+                    "key not transferred: {message}. Enter the password on the new device instead."
                 ));
                 return Ok(Exchange::Refused);
             }
-            other => anyhow::bail!("неожиданный ответ: {other:?}"),
+            other => anyhow::bail!("unexpected response: {other:?}"),
         }
         if !pause(wait).await {
             cancel(sess, code).await;
@@ -356,7 +352,7 @@ pub async fn give_key(
         }
     }
     cancel(sess, code).await;
-    ui.say("новое устройство не пришло за отведённое время");
+    ui.say("new device did not connect before the timeout");
     Ok(Exchange::Refused)
 }
 
@@ -372,13 +368,13 @@ async fn offer_revoke(
         return Ok(Exchange::Refused);
     }
     match ui
-        .ask(&format!("Отозвать подключившееся устройство «{name}»?"))
+        .ask(&format!("Revoke newly connected device {name}?"))
         .await
     {
         Answer::Yes => match sess.command(UiCommand::RevokeDevice { id: device }).await? {
-            UiResult::Ok => ui.say(&format!("устройство «{name}» отозвано")),
-            UiResult::Error { message, .. } => ui.say(&format!("не отозвано: {message}")),
-            other => anyhow::bail!("неожиданный ответ: {other:?}"),
+            UiResult::Ok => ui.say(&format!("device {name} revoked")),
+            UiResult::Error { message, .. } => ui.say(&format!("not revoked: {message}")),
+            other => anyhow::bail!("unexpected response: {other:?}"),
         },
         Answer::No => {}
         Answer::Interrupted => return Ok(Exchange::Interrupted),
@@ -424,7 +420,7 @@ pub async fn receive_key(
                 step: HandoffStep::Done,
                 ..
             } => {
-                ui.say("ключ шифрования получен");
+                ui.say("encryption key received");
                 return Ok(Exchange::Done);
             }
             UiResult::Handoff {
@@ -437,21 +433,19 @@ pub async fn receive_key(
                 if qr {
                     if said != Some(HandoffStep::Confirm) {
                         ui.say(&format!(
-                            "цифры обмена: {}. При входе по QR на устройстве с кодом их сверять \
-                             не нужно; если оно всё же показывает цифры и они не совпадают — \
-                             нажмите там «нет» (не передавать)",
+                            "exchange digits: {}. With QR pairing, comparison on the source device is optional; if digits are displayed there and differ, refuse the key transfer.",
                             format_sas(&sas)
                         ));
                     }
                 } else if confirmed.as_deref() != Some(sas.as_str()) {
                     let q = format!(
-                        "цифры на этом устройстве: {}. Совпадают с экраном устройства, где открыт код?",
+                        "digits on this device: {}. Do they match the device displaying the connection code?",
                         format_sas(&sas)
                     );
                     match ui.ask(&q).await {
                         Answer::Yes => {
                             confirmed = Some(sas);
-                            ui.say("подтвердите передачу ключа на устройстве, где открыт код");
+                            ui.say("approve the key transfer on the device displaying the connection code");
                             said = Some(HandoffStep::Confirm);
                             r = sess
                                 .command(UiCommand::ReceivePoll {
@@ -466,7 +460,7 @@ pub async fn receive_key(
                             if a == Answer::Interrupted {
                                 return Ok(Exchange::Interrupted);
                             }
-                            ui.say("цифры не совпали — возможна подмена, ключ не принят");
+                            ui.say("digits differ; possible tampering, key rejected");
                             return Ok(Exchange::Refused);
                         }
                     }
@@ -478,17 +472,16 @@ pub async fn receive_key(
                 if said.is_none() {
                     said = Some(HandoffStep::Waiting);
                     ui.say(
-                        "ждём ключ шифрования с устройства, где открыт код \
-                         (Ctrl-C — ввести пароль позже)…",
+                        "waiting for the encryption key from the source device (Ctrl-C to enter the password later)...",
                     );
                 }
                 wait = next_pause(wait, interval, offline, ui);
             }
             UiResult::Error { message, .. } => {
-                ui.say(&format!("ключ не пришёл: {message}"));
+                ui.say(&format!("key not received: {message}"));
                 return Ok(Exchange::Refused);
             }
-            other => anyhow::bail!("неожиданный ответ: {other:?}"),
+            other => anyhow::bail!("unexpected response: {other:?}"),
         }
         if now_ms() >= deadline_ms {
             let _ = sess.command(UiCommand::CancelReceive).await;

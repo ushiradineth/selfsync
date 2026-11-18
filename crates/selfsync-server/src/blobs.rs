@@ -30,9 +30,9 @@ pub enum WriteOutcome {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StreamError {
-    #[error("ошибка ввода-вывода: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] io::Error),
-    #[error("тело запроса оборвалось")]
+    #[error("request body was interrupted")]
     Body,
 }
 

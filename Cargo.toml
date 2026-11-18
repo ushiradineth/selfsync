@@ -10,11 +10,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.10.1"
+version = "0.10.2"
 edition = "2024"
 license = "MIT"
 rust-version = "1.97"
-repository = "https://github.com/Darkildo/selfsync"
+repository = "https://github.com/ushiradineth/selfsync"
 
 [workspace.dependencies]
 selfsync-proto = { path = "crates/selfsync-proto" }
@@ -59,10 +59,10 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
 bytes = "1"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.42", features = ["bundled"] }
 r2d2 = "0.8"
 scheduled-thread-pool = "0.2"
-r2d2_sqlite = "0.35"
+r2d2_sqlite = "0.37"
 listenfd = "1"
 clap = { version = "4", features = ["derive", "env"] }
 humantime = "2"

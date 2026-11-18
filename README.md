@@ -76,7 +76,7 @@ Both ways put the server behind Caddy, which gets a Let's Encrypt certificate by
 **A VPS with systemd** (Debian, Ubuntu, Fedora), one command:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Darkildo/selfsync/main/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/ushiradineth/selfsync/main/deploy/install.sh \
   | sudo sh -s -- --domain notes.example.com
 ```
 
